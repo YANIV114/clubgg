@@ -1,0 +1,128 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/prompt-leak-reminder.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start.sh",
+            "timeout": 5,
+            "statusMessage": "Loading project rules..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-write-lint.sh",
+            "timeout": 30,
+            "statusMessage": "Formatting and linting..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-write-lint.sh",
+            "timeout": 30,
+            "statusMessage": "Formatting and linting..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-sensitive-paths.sh",
+            "timeout": 5,
+            "statusMessage": "Checking path sensitivity..."
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-destructive-bash.sh",
+            "timeout": 10,
+            "statusMessage": "Checking for destructive commands..."
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-commit-tests.sh",
+            "timeout": 120,
+            "statusMessage": "Running test suite..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-sensitive-paths.sh",
+            "timeout": 5,
+            "statusMessage": "Checking path sensitivity..."
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard-chip-amounts.sh",
+            "timeout": 10,
+            "statusMessage": "Checking chip amount types..."
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard-migration-structure.sh",
+            "timeout": 10,
+            "statusMessage": "Validating migration structure..."
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard-layer-separation.sh",
+            "timeout": 10,
+            "statusMessage": "Checking module layer separation..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-sensitive-paths.sh",
+            "timeout": 5,
+            "statusMessage": "Checking path sensitivity..."
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard-chip-amounts.sh",
+            "timeout": 10,
+            "statusMessage": "Checking chip amount types..."
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard-layer-separation.sh",
+            "timeout": 10,
+            "statusMessage": "Checking module layer separation..."
+          }
+        ]
+      }
+    ]
+  }
+}

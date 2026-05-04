@@ -1,0 +1,143 @@
+ClubGG Hand #98765001: Hold'em No Limit ($0.50/$1.00) - 2024-03-10 18:45:22 UTC
+Club: TestClub (ID: 42)  Agent: MainAgent (ID: 7)
+Table 'Ruby 3' 6-max Seat #2 is the button
+Seat 1: Alice ($150.00 in chips)
+Seat 2: Bob ($95.50 in chips)
+Seat 3: Charlie ($200.00 in chips)
+Alice: posts small blind $0.50
+Bob: posts big blind $1.00
+*** HOLE CARDS ***
+Charlie: folds
+Alice: raises $3.00 to $3.50
+Bob: calls $2.50
+*** FLOP *** [Ah Kd 2c]
+Alice: bets $4.00
+Bob: calls $4.00
+*** TURN *** [Ah Kd 2c Ts]
+Alice: bets $10.00
+Bob: folds
+*** SUMMARY ***
+Total pot $16.00 | Rake $0.80
+Board [Ah Kd 2c Ts]
+Seat 1: Alice collected $15.20 from main pot
+
+ClubGG Hand #98765002: Hold'em No Limit ($1.00/$2.00) - 2024-03-10 18:52:07 UTC
+Club: TestClub (ID: 42)  Agent: MainAgent (ID: 7)
+Table 'Ruby 3' 6-max Seat #1 is the button
+Seat 1: Bob ($190.00 in chips)
+Seat 2: Charlie ($210.00 in chips)
+Bob: posts small blind $1.00
+Charlie: posts big blind $2.00
+*** HOLE CARDS ***
+Bob: raises $6.00 to $6.00
+Charlie: calls $4.00
+*** FLOP *** [Jh Jd 5s]
+Charlie: checks
+Bob: bets $8.00
+Charlie: raises $24.00 to $24.00
+Bob: calls $16.00
+*** TURN *** [Jh Jd 5s 9c]
+Charlie: bets $30.00
+Bob: calls $30.00
+*** RIVER *** [Jh Jd 5s 9c Kh]
+Charlie: bets $50.00
+Bob: calls $50.00
+*** SHOW DOWN ***
+Charlie: shows [Js 5h] (Full House, Jacks full of Fives)
+Bob: shows [Kd Ks] (Full House, Kings full of Jacks)
+*** SUMMARY ***
+Total pot $220.00 | Rake $5.00
+Board [Jh Jd 5s 9c Kh]
+Seat 1: Bob collected $215.00 from main pot
+
+ClubGG Hand #98765003: Hold'em No Limit ($1.00/$2.00/$0.25) - 2024-03-10 19:10:00 UTC
+Club: TestClub (ID: 42)  Agent: MainAgent (ID: 7)
+Table 'Ruby 3' 6-max Seat #3 is the button
+Seat 1: Alice ($50.00 in chips)
+Seat 2: Bob ($120.00 in chips)
+Seat 3: Charlie ($200.00 in chips)
+Alice: posts ante $0.25
+Bob: posts ante $0.25
+Charlie: posts ante $0.25
+Alice: posts small blind $1.00
+Bob: posts big blind $2.00
+*** HOLE CARDS ***
+Charlie: raises $6.00 to $6.00
+Alice: raises $44.00 to $50.00 and is all-in
+Bob: folds
+Charlie: calls $44.00
+*** FLOP *** [Kh Qd 5c]
+*** TURN *** [Kh Qd 5c 3s]
+*** RIVER *** [Kh Qd 5c 3s 2h]
+*** SHOW DOWN ***
+Alice: shows [Ah Kc] (a pair of Kings)
+Charlie: shows [7h 7d] (a pair of Sevens)
+*** SUMMARY ***
+Total pot $100.00 | Rake $2.00
+Board [Kh Qd 5c 3s 2h]
+Seat 1: Alice collected $98.00 from main pot
+Seat 2: Bob folded before Flop
+Seat 3: Charlie showed [7h 7d] and lost
+
+ClubGG Hand #98765004: Hold'em No Limit ($0.50/$1.00) - 2024-03-10 19:30:00 UTC
+Club: TestClub (ID: 42)  Agent: MainAgent (ID: 7)
+Table 'Ruby 3' 6-max Seat #1 is the button
+Seat 1: Alice ($100.00 in chips)
+Seat 2: Bob ($80.00 in chips)
+Alice: posts small blind $0.50
+Bob: posts big blind $1.00
+*** HOLE CARDS ***
+Alice: raises $2.50 to $3.00
+Bob: calls $2.00
+*** FLOP *** [7c 8d 9h]
+Bob: checks
+Alice: bets $4.00
+Bob: calls $4.00
+*** TURN *** [7c 8d 9h Td]
+Bob: checks
+Alice: bets $10.00
+Bob: calls $10.00
+*** RIVER *** [7c 8d 9h Td 2s]
+Bob: checks
+Alice: bets $20.00
+Bob: calls $20.00
+*** SHOW DOWN ***
+Alice: shows [Jc Ts] (a straight, Seven to Jack)
+Bob: mucks hand
+*** SUMMARY ***
+Total pot $74.00 | Rake $2.00
+Board [7c 8d 9h Td 2s]
+Seat 1: Alice collected $72.00 from main pot
+Seat 2: Bob mucked [Ks Kh]
+
+ClubGG Hand #98765005: Hold'em No Limit ($0.50/$1.00) - 2024-03-10 19:45:00 UTC
+Club: TestClub (ID: 42)  Agent: MainAgent (ID: 7)
+Table 'Ruby 3' 6-max Seat #3 is the button
+Seat 1: Alice ($100.00 in chips)
+Seat 2: Bob ($3.00 in chips)
+Seat 3: Charlie ($100.00 in chips)
+Alice: posts small blind $0.50
+Bob: posts big blind $1.00
+*** HOLE CARDS ***
+Charlie: raises $10.00 to $10.00
+Alice: calls $9.50
+Bob: calls $2.00 and is all-in
+*** FLOP *** [As 7d 2c]
+Alice: checks
+Charlie: checks
+*** TURN *** [As 7d 2c Jh]
+Alice: checks
+Charlie: checks
+*** RIVER *** [As 7d 2c Jh 3s]
+Alice: checks
+Charlie: checks
+*** SHOW DOWN ***
+Alice: shows [Ad Td] (a pair of Aces)
+Charlie: shows [Qh Qd] (a pair of Queens)
+Bob: shows [Kc Kd] (a pair of Kings)
+*** SUMMARY ***
+Total pot $23.00 | Rake $1.00
+Board [As 7d 2c Jh 3s]
+Seat 1: Alice collected $13.50 from side pot
+Seat 2: Bob collected $8.50 from main pot
+Seat 3: Charlie showed [Qh Qd] and lost

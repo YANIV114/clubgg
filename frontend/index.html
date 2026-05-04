@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClubGG Analytics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── SP: TOP NAV (SaaS shell) ────────────────────────── -->
+  <nav class="sp-nav" role="navigation" aria-label="Main navigation">
+    <div class="sp-nav-inner">
+      <button class="sp-nav-logo" data-route="/" aria-label="ClubGG home">
+        <svg class="sp-nav-logo-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <polygon points="10,2 18,10 10,18 2,10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <polygon points="10,2 18,10 10,10" fill="currentColor" opacity="0.35"/>
+        </svg>
+        ClubGG
+      </button>
+      <div class="sp-nav-items" role="list">
+        <button class="sp-nav-item" data-route="/"          role="listitem">Dashboard</button>
+        <button class="sp-nav-item" data-route="/analysis"  role="listitem">Analysis</button>
+        <button class="sp-nav-item" data-route="/learn"     role="listitem">Learn</button>
+        <button class="sp-nav-item" data-route="/trainer"   role="listitem">Practice</button>
+        <button class="sp-nav-item" data-route="/progress"  role="listitem">Progress</button>
+        <button class="sp-nav-item" data-route="/account"   role="listitem">Account</button>
+        <button class="sp-nav-item sp-nav-admin" data-route="/admin" role="listitem" hidden>Admin</button>
+      </div>
+      <div class="sp-nav-user">
+        <span id="sp-plan-badge" class="sp-plan-badge sp-plan-badge--starter">Starter</span>
+        <div id="sp-nav-avatar" class="sp-nav-avatar" title="Account" aria-label="User account">—</div>
+        <button id="sp-nav-logout" class="sp-nav-logout" hidden aria-label="Sign out">Sign out</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── LP: LANDING PAGE VIEW ───────────────────────────── -->
+  <div id="sp-view-landing" class="sp-view">
+    <!-- Populated by _spRenderLanding() -->
+  </div>
+
+  <!-- ── SP: DASHBOARD VIEW ───────────────────────────────── -->
+  <div id="sp-view-dashboard" class="sp-view">
+    <!-- Populated by spRenderDashboard() -->
+  </div>
+
+  <!-- ── SP: ANALYSIS VIEW (wraps existing analytics UI) ─── -->
+  <div id="sp-view-analysis" class="sp-view">
+
+    <!-- ── HEADER ─────────────────────────────────────────── -->
+    <header class="header">
+      <div class="header-brand">
+        <!-- Diamond icon -->
+        <svg class="header-brand-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <polygon points="10,2 18,10 10,18 2,10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <polygon points="10,2 18,10 10,10" fill="currentColor" opacity="0.3"/>
+        </svg>
+        <div>
+          <div class="header-brand-name">ClubGG Analytics</div>
+          <div class="header-brand-sub">Poker Intelligence</div>
+        </div>
+      </div>
+
+      <div class="header-search">
+        <div class="player-input-wrap" id="player-input-wrap">
+          <input
+            id="player-input"
+            class="header-input"
+            type="text"
+            placeholder="Enter player UUID…"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Player UUID"
+          >
+          <button id="recent-toggle" class="btn-recent-toggle" title="Recent players" aria-label="Show recent players">▾</button>
+          <div class="recent-dropdown" id="recent-dropdown" hidden>
+            <div class="recent-list" id="recent-list"></div>
+            <button class="recent-clear-btn" id="recent-clear-btn">Clear history</button>
+          </div>
+        </div>
+        <button id="load-btn" class="btn-primary">Load Player</button>
+      </div>
+
+      <div class="header-active-player" id="active-player" aria-live="polite">
+        No player loaded
+      </div>
+    </header>
+
+    <!-- ── AN: ANALYSIS HUB (rendered by _anInitHub) ──────── -->
+    <div id="an-hub" class="an-hub" aria-label="Analysis hub"></div>
+
+    <!-- ── AN: ANALYTICS WORKSPACE LABEL ───────────────────── -->
+    <div class="an-workspace-label">
+      <span>Analytics Workspace</span>
+    </div>
+
+    <!-- ── TAB BAR ────────────────────────────────────────── -->
+    <nav class="tab-bar" role="tablist" aria-label="Dashboard sections">
+      <button
+        class="tab-btn active"
+        data-tab="home"
+        role="tab"
+        aria-selected="true"
+        aria-controls="panel-home"
+      >Home</button>
+      <button
+        class="tab-btn"
+        data-tab="stats"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-stats"
+      >Stats</button>
+      <button
+        class="tab-btn"
+        data-tab="leaks"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-leaks"
+      >Leaks</button>
+      <button
+        class="tab-btn"
+        data-tab="plan"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-plan"
+      >Tournament Plan</button>
+      <button
+        class="tab-btn"
+        data-tab="import"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-import"
+      >Import</button>
+      <button
+        class="tab-btn"
+        data-tab="trainer"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-trainer"
+      >Trainer</button>
+      <button
+        class="tab-btn"
+        data-tab="progress"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-progress"
+      >Progress</button>
+    </nav>
+
+    <!-- ── CONTENT ────────────────────────────────────────── -->
+    <main class="content">
+
+      <!-- Home Panel -->
+      <section
+        id="panel-home"
+        class="tab-panel active"
+        role="tabpanel"
+        aria-labelledby="tab-home"
+      >
+        <!-- Populated by renderHome() -->
+      </section>
+
+      <!-- Stats Panel -->
+      <section
+        id="panel-stats"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-stats"
+      >
+        <!-- Populated by renderStats() -->
+      </section>
+
+      <!-- Leaks Panel -->
+      <section
+        id="panel-leaks"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-leaks"
+      >
+        <!-- Populated by renderLeaks() -->
+      </section>
+
+      <!-- Tournament Plan Panel -->
+      <section
+        id="panel-plan"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-plan"
+      >
+        <!-- Populated by renderPlanEmpty() or renderPlan() -->
+      </section>
+
+      <!-- Import Panel -->
+      <section
+        id="panel-import"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-import"
+      >
+        <!-- Populated by renderImport() -->
+      </section>
+
+      <!-- Trainer Panel -->
+      <section
+        id="panel-trainer"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-trainer"
+      >
+        <!-- Populated by renderTrainer() -->
+      </section>
+
+      <!-- Progress Panel -->
+      <section
+        id="panel-progress"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-progress"
+      >
+        <!-- Populated by renderProgress() -->
+      </section>
+
+    </main>
+
+  </div><!-- /#sp-view-analysis -->
+
+  <!-- ── SP: TRAINER VIEW ────────────────────────────────── -->
+  <div id="sp-view-trainer" class="sp-view">
+    <!-- Populated by trRenderTrainer() -->
+  </div>
+
+  <!-- ── SP: LEARN VIEW ───────────────────────────────────── -->
+  <div id="sp-view-learn" class="sp-view">
+    <!-- Populated by spRenderLearn() -->
+  </div>
+
+  <!-- ── SP: PROGRESS VIEW ────────────────────────────────── -->
+  <div id="sp-view-progress" class="sp-view">
+    <!-- Populated by spRenderProgress() -->
+  </div>
+
+  <!-- ── SP: ACCOUNT VIEW ─────────────────────────────────── -->
+  <div id="sp-view-account" class="sp-view">
+    <!-- Populated by _spRenderAccount() -->
+  </div>
+
+  <!-- ── SP: PRICING VIEW ─────────────────────────────────── -->
+  <div id="sp-view-pricing" class="sp-view">
+    <!-- Populated by _spRenderPricing() -->
+  </div>
+
+  <!-- ── SP: LOGIN VIEW ──────────────────────────────────────── -->
+  <div id="sp-view-login" class="sp-view">
+    <!-- Populated by authRenderLogin() -->
+  </div>
+
+  <!-- ── SP: SIGNUP VIEW ─────────────────────────────────────── -->
+  <div id="sp-view-signup" class="sp-view">
+    <!-- Populated by authRenderSignup() -->
+  </div>
+
+  <!-- ── OB: ONBOARDING VIEW ──────────────────────────────── -->
+  <div id="sp-view-onboarding" class="sp-view">
+    <!-- Populated by _spRenderOnboarding() -->
+  </div>
+
+  <!-- ── AD: ADMIN VIEW ────────────────────────────────────── -->
+  <div id="sp-view-admin" class="sp-view">
+    <!-- Populated by _spRenderAdmin() -->
+  </div>
+
+  <!-- ── AC: UPGRADE MODAL ─────────────────────────────────── -->
+  <div class="ac-modal-overlay" id="ac-modal-overlay" hidden>
+    <div class="ac-modal" id="ac-modal">
+      <button class="ac-modal-close" id="ac-modal-close" aria-label="Close">&#10005;</button>
+      <div class="ac-modal-icon">&#128274;</div>
+      <h2 class="ac-modal-title" id="ac-modal-title">Upgrade Required</h2>
+      <p class="ac-modal-desc" id="ac-modal-desc"></p>
+      <div class="ac-modal-features" id="ac-modal-features"></div>
+      <button class="sp-btn-primary ac-modal-cta" id="ac-modal-cta">View Plans &rarr;</button>
+      <div class="ac-modal-footnote" id="ac-modal-footnote"></div>
+    </div>
+  </div>
+
+</div><!-- /#app -->
+<script src="/static/app.js?v=999"></script>
+</body>
+</html>

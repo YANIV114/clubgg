@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: clubgg
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter        # upgrade to standard for production traffic
+    region: oregon       # change to match your users' region
+
+    envVars:
+      # ── Required — set these in the Render dashboard ──────────────────────
+      - key: DATABASE_URL
+        # Format: postgresql+asyncpg://user:pass@host:5432/dbname
+        # Use the "Internal Database URL" from Render DB + replace "postgresql://" with "postgresql+asyncpg://"
+        sync: false
+
+      - key: JWT_SECRET_KEY
+        generateValue: true   # Render auto-generates a secure random value
+
+      - key: BETA_INVITE_CODE
+        sync: false           # Set this to your private invite code
+
+      - key: CORS_ORIGINS
+        sync: false           # e.g. https://your-app.onrender.com
+
+      - key: ENVIRONMENT
+        value: production
+
+      # ── Optional — only needed if Stripe billing is enabled ───────────────
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_STARTER
+        sync: false
+      - key: STRIPE_PRICE_PRO
+        sync: false
+      - key: STRIPE_PRICE_ELITE
+        sync: false
+      - key: BILLING_SUCCESS_URL
+        sync: false
+      - key: BILLING_CANCEL_URL
+        sync: false
+
+      # ── Optional — ClubGG API ingestion ───────────────────────────────────
+      - key: CLUBGG_API_KEY
+        sync: false
+      - key: CLUBGG_CLUB_IDS
+        sync: false

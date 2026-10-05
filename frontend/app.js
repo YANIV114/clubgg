@@ -541,7 +541,8 @@ async function loadPlayer(id) {
       apiFetch(`/players/${encodeURIComponent(id)}/leaks`),
       apiFetch(`/players/${encodeURIComponent(id)}/sample`),
       // Optional: a failure here must not block the rest of the dashboard.
-      apiFetch(`/players/${encodeURIComponent(id)}/leak-report`).catch(() => null),
+      // limit=1000 matches the /leaks default so both sections cover the same hands.
+      apiFetch(`/players/${encodeURIComponent(id)}/leak-report?limit=1000`).catch(() => null),
     ]);
 
     if (activeEl) {

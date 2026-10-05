@@ -635,6 +635,20 @@ html, body {
   gap: var(--sp-3);
 }
 
+/* Per-hand findings section, below the stat-based leak cards */
+.hand-findings-header {
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.finding-evidence {
+  margin: 0;
+  padding-left: var(--sp-4);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
 /* Leak Card */
 .leak-card {
   background: var(--bg-card);

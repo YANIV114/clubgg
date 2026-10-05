@@ -248,3 +248,36 @@ async def test_leaks_limit_param(
     data = resp.json()
     assert resp.status_code == 200
     assert data["hand_count"] == 1
+
+
+# ── Per-hand leak report ──────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+async def test_leak_report_404_unknown_player(
+    async_client: AsyncClient, ingested: None
+) -> None:
+    resp = await async_client.get(
+        "/api/v1/players/00000000-0000-0000-0000-000000000000/leak-report"
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_leak_report_shape(async_client: AsyncClient, alice: Player) -> None:
+    resp = await async_client.get(f"/api/v1/players/{alice.id}/leak-report")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["player_id"] == str(alice.id)
+    assert data["total_hands_analyzed"] == 4
+    assert isinstance(data["leaks"], list)
+    assert isinstance(data["summary"], str) and data["summary"]
+
+
+@pytest.mark.integration
+async def test_leak_report_empty_player(
+    async_client: AsyncClient, player_no_hands: Player
+) -> None:
+    data = (await async_client.get(f"/api/v1/players/{player_no_hands.id}/leak-report")).json()
+    assert data["total_hands_analyzed"] == 0
+    assert data["leaks"] == []

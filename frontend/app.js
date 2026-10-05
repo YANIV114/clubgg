@@ -11,6 +11,7 @@ const API = '/api/v1';
 let currentPlayerId = null;
 let statsData = null;
 let leaksData = null;
+let leakReportData = null;  // per-hand findings; null if unavailable
 let planData = null;
 let sampleData = null;
 let activeTab = 'home';
@@ -524,6 +525,7 @@ async function loadPlayer(id) {
   currentPlayerId = id;
   statsData = null;
   leaksData = null;
+  leakReportData = null;
   planData = null;
   sampleData = null;
   leakFilter = 'all';
@@ -534,10 +536,12 @@ async function loadPlayer(id) {
   showLoadingInPanels();
 
   try {
-    [statsData, leaksData, sampleData] = await Promise.all([
+    [statsData, leaksData, sampleData, leakReportData] = await Promise.all([
       apiFetch(`/players/${encodeURIComponent(id)}/stats`),
       apiFetch(`/players/${encodeURIComponent(id)}/leaks`),
       apiFetch(`/players/${encodeURIComponent(id)}/sample`),
+      // Optional: a failure here must not block the rest of the dashboard.
+      apiFetch(`/players/${encodeURIComponent(id)}/leak-report`).catch(() => null),
     ]);
 
     if (activeEl) {
@@ -557,6 +561,7 @@ async function loadPlayer(id) {
     currentPlayerId = null;
     statsData = null;
     leaksData = null;
+    leakReportData = null;
     sampleData = null;
     if (activeEl) activeEl.innerHTML = `<span style="color:var(--red)">Load failed — ${escHtml(err.message)}</span>`;
     showErrorInPanels(err.message);
@@ -1239,6 +1244,8 @@ function renderLeaks(data) {
     html += `</div>`;
   }
 
+  html += _renderHandFindings(leakReportData);
+
   panel.innerHTML = html;
 
   // Bind filter pills
@@ -1312,6 +1319,74 @@ function renderLeakCard(leak) {
       ${_renderLeakExamples(leak)}
     </div>
   </div>`;
+}
+
+/* Per-hand findings (from /leak-report): decision patterns across individual
+   hands, e.g. push/fold and calling shoves.  Complements the stat-based cards. */
+
+// Report severities map onto the existing severity badge colours.
+const _FINDING_SEV_CLS = { critical: 'high', major: 'medium', minor: 'low' };
+
+function _renderHandFindings(report) {
+  if (!report) return '';
+  const findings = report.leaks || [];
+
+  let html = `<div class="leaks-summary hand-findings-header">
+    Hand-by-hand findings — <span class="text-secondary">${escHtml(report.summary || '')}</span>
+  </div>`;
+
+  if (findings.length === 0) return html;
+
+  html += `<div class="leaks-list">`;
+  for (const f of findings) {
+    const sevCls  = _FINDING_SEV_CLS[f.severity] || 'low';
+    const confCls = f.confidence || 'low';
+    const freq    = f.frequency != null ? `${(f.frequency * 100).toFixed(1)}% of spots` : '';
+    const evidence = (f.evidence || [])
+      .map(e => `<li>${escHtml(e)}</li>`)
+      .join('');
+    html += `<div class="leak-card">
+      <div class="leak-card-bar sev-${sevCls}"></div>
+      <div class="leak-card-body">
+        <div class="leak-card-header">
+          <span class="severity-badge ${sevCls}">${escHtml((f.severity || '').toUpperCase())}</span>
+          <span class="category-pill">${escHtml(f.category || '')}</span>
+          <span class="leak-id-text">${escHtml(f.leak_id || '')}</span>
+        </div>
+        <div class="leak-card-title">${escHtml(f.title || '')}</div>
+        <div class="leak-evidence">${escHtml(f.description || '')}</div>
+        <div class="leak-collapsibles">
+          <div>
+            <button class="collapsible-trigger">
+              <span class="chevron">▶</span>&nbsp;Hands
+            </button>
+            <div class="collapsible-body"><ul class="finding-evidence">${evidence}</ul></div>
+          </div>
+          <div>
+            <button class="collapsible-trigger">
+              <span class="chevron">▶</span>&nbsp;Suggested Fix
+            </button>
+            <div class="collapsible-body">${escHtml(f.suggested_fix || '')}</div>
+          </div>
+          <div>
+            <button class="collapsible-trigger">
+              <span class="chevron">▶</span>&nbsp;Limitations
+            </button>
+            <div class="collapsible-body">${escHtml(f.limitations || '')}</div>
+          </div>
+        </div>
+        <div class="leak-card-footer">
+          <span class="confidence-badge ${confCls}" title="Confidence level">
+            ${escHtml(confCls.toUpperCase())} CONFIDENCE
+          </span>
+          <span class="sample-size-text">n=${f.sample_size ?? '?'}</span>
+          <span class="frequency-text">${escHtml(freq)}</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
 }
 
 function _renderLeakExamples(leak) {

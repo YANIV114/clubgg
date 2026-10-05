@@ -18,7 +18,7 @@ from app.ingestion.hand_parser import _HAND_BLOCK_RE, HandHistoryFileIngestor, H
 from app.models.hand import Hand, HandPlayer
 from app.models.player import Club, Player
 from app.models.user import User
-from app.schemas.leak_report import LeakFindingOut, LeakReportOut
+from app.schemas.leak_report import LeakReportOut
 from app.schemas.leaks import LeakExampleOut, LeakOut, PlayerLeaksOut
 from app.schemas.me import (
     HandPlayerSummaryOut,
@@ -268,29 +268,7 @@ async def get_my_leak_report(
         from_date=from_date,
         to_date=to_date,
     )
-    return LeakReportOut(
-        player_id=report.player_id,
-        leaks=[
-            LeakFindingOut(
-                leak_id=lk.leak_id,
-                category=lk.category,
-                title=lk.title,
-                description=lk.description,
-                evidence=lk.evidence,
-                confidence=lk.confidence,
-                severity=lk.severity,
-                frequency=lk.frequency,
-                sample_size=lk.sample_size,
-                limitations=lk.limitations,
-                suggested_fix=lk.suggested_fix,
-            )
-            for lk in report.leaks
-        ],
-        summary=report.summary,
-        total_hands_analyzed=report.total_hands_analyzed,
-        sample_size=report.sample_size,
-        generated_at=report.generated_at,
-    )
+    return LeakReportOut.model_validate(report, from_attributes=True)
 
 
 # ── Recent hands ──────────────────────────────────────────────────────────────

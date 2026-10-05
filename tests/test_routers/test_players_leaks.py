@@ -354,3 +354,24 @@ async def test_tournaments_cash_fixture_has_none(async_client: AsyncClient, alic
     assert data["tournaments"] == []
     assert data["phases"] == []
     assert data["hands_without_tournament"] == 4
+
+
+# ── Progress ──────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+async def test_progress_404_unknown_player(async_client: AsyncClient, ingested: None) -> None:
+    resp = await async_client.get("/api/v1/players/00000000-0000-0000-0000-000000000000/progress")
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_progress_shape(async_client: AsyncClient, alice: Player) -> None:
+    data = (await async_client.get(f"/api/v1/players/{alice.id}/progress")).json()
+    assert sum(p["hands"] for p in data["periods"]) + data["short_stack_excluded"] <= 4
+    for period in data["periods"]:
+        for m in period["metrics"]:
+            if m["value"] is not None:
+                assert m["ci_low"] <= m["value"] <= m["ci_high"]
+    # The fixture hands are all from one month: nothing to compare yet.
+    assert data["comparison"] == []

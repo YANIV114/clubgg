@@ -14,6 +14,7 @@ let leaksData = null;
 let leakReportData = null;  // per-hand findings; null if unavailable
 let resultsData = null;     // chip results by position / depth; null if unavailable
 let tournamentsData = null; // per-tournament summaries + phases; null if unavailable
+let progressData = null;    // play frequencies per month; null if unavailable
 let planData = null;
 let sampleData = null;
 let activeTab = 'home';
@@ -531,6 +532,7 @@ async function loadPlayer(id) {
   leakReportData = null;
   resultsData = null;
   tournamentsData = null;
+  progressData = null;
   planData = null;
   sampleData = null;
   leakFilter = 'all';
@@ -541,7 +543,7 @@ async function loadPlayer(id) {
   showLoadingInPanels();
 
   try {
-    [statsData, leaksData, sampleData, leakReportData, resultsData, tournamentsData] = await Promise.all([
+    [statsData, leaksData, sampleData, leakReportData, resultsData, tournamentsData, progressData] = await Promise.all([
       apiFetch(`/players/${encodeURIComponent(id)}/stats`),
       apiFetch(`/players/${encodeURIComponent(id)}/leaks`),
       apiFetch(`/players/${encodeURIComponent(id)}/sample`),
@@ -550,6 +552,7 @@ async function loadPlayer(id) {
       apiFetch(`/players/${encodeURIComponent(id)}/leak-report?limit=1000`).catch(() => null),
       apiFetch(`/players/${encodeURIComponent(id)}/results`).catch(() => null),
       apiFetch(`/players/${encodeURIComponent(id)}/tournaments`).catch(() => null),
+      apiFetch(`/players/${encodeURIComponent(id)}/progress`).catch(() => null),
     ]);
 
     if (activeEl) {
@@ -563,6 +566,7 @@ async function loadPlayer(id) {
     renderStats(statsData);
     renderLeaks(leaksData);
     renderResults(resultsData, tournamentsData);
+    renderProgress();
     clearPanel(els.planPanel(), renderPlanEmpty);
     trainerState = null;
     renderTrainer();
@@ -573,6 +577,7 @@ async function loadPlayer(id) {
     leakReportData = null;
     resultsData = null;
     tournamentsData = null;
+    progressData = null;
     sampleData = null;
     if (activeEl) activeEl.innerHTML = `<span style="color:var(--red)">Load failed — ${escHtml(err.message)}</span>`;
     showErrorInPanels(err.message);
@@ -2695,6 +2700,56 @@ function _missedSpotsSection(state) {
    PROGRESS TAB
    ============================================================ */
 
+/* Play progress from real hands: key preflop frequencies per month with 95%
+   intervals; the latest month vs all earlier months.  Shown above the
+   training-accuracy section of the Progress tab. */
+const _VERDICT_CLS = { improved: 'res-pos', worse: 'res-neg' };
+
+function _renderPlayProgress(data) {
+  if (!data || !data.periods || !data.periods.length) return '';
+  const pct = v => (v == null ? '—' : `${(parseFloat(v) * 100).toFixed(0)}%`);
+  const periods = data.periods;
+  const cmp = Object.fromEntries((data.comparison || []).map(c => [c.key, c]));
+  const keys = periods[0].metrics.map(m => m.key);
+
+  const head = periods.map(p =>
+    `<th class="num">${escHtml(p.label)}<div class="prog-th-sub">${escHtml(p.hands)} hands</div></th>`
+  ).join('');
+  const rows = keys.map(key => {
+    const first = periods[0].metrics.find(m => m.key === key);
+    const cells = periods.map(p => {
+      const m = p.metrics.find(x => x.key === key);
+      if (!m || m.value == null) return '<td class="num text-secondary">—</td>';
+      return `<td class="num">${pct(m.value)}<div class="prog-ci">${pct(m.ci_low)}–${pct(m.ci_high)} · n=${escHtml(m.n)}</div></td>`;
+    }).join('');
+    const c = cmp[key];
+    const verdict = c
+      ? `<span class="${_VERDICT_CLS[c.verdict] || 'res-neutral'}">${escHtml(c.verdict)}</span>`
+      : '<span class="res-neutral">—</span>';
+    return `<tr>
+      <td>${escHtml(first.label)}</td>
+      ${cells}
+      <td class="num text-secondary">${pct(first.normal_low)}–${pct(first.normal_high)}</td>
+      <td>${verdict}</td>
+    </tr>`;
+  }).join('');
+
+  const latest = data.latest_label && periods.length > 1
+    ? `Latest month (${escHtml(data.latest_label)}) vs all earlier months`
+    : 'Needs at least two months of hands';
+  return `<div class="results-block prog-play">
+    <div class="results-block-title">Your play over time — from your real hands (20bb+ effective)</div>
+    <table class="results-table">
+      <thead><tr><th>Stat</th>${head}<th class="num">Normal range</th><th>${latest}</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="results-note">Each value shows a 95% range and sample size. A change is called improved or worse
+    only when it is statistically significant, judged by whether it moved toward the normal range for
+    tournaments with antes (approximate guidelines, not solver output). Small months give wide ranges —
+    import more hands to tighten them.</div>
+  </div>`;
+}
+
 function renderProgress() {
   const panel = document.getElementById('panel-progress');
   if (!panel) return;
@@ -2702,8 +2757,10 @@ function renderProgress() {
   const h = _ensureHistoryShape(loadTrainerHistory() || _emptyHistory());
   const sessions = h.sessions;
 
+  const playHtml = _renderPlayProgress(progressData);
+
   if (sessions.length === 0) {
-    panel.innerHTML = `<div class="empty-state">
+    panel.innerHTML = playHtml + `<div class="empty-state">
       ${_EMPTY_ICON}
       <div class="empty-state-title">No training history yet</div>
       <div class="empty-state-sub">Complete a training session to see your progress here.</div>
@@ -2854,7 +2911,7 @@ function renderProgress() {
     </div>
   </div>`;
 
-  panel.innerHTML = `<div class="prog-layout">
+  panel.innerHTML = playHtml + `<div class="prog-layout">
     ${summaryHtml}
     ${sparkSection}
     ${highlightsHtml}

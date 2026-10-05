@@ -12339,3 +12339,7 @@ details[open] .rv-limitations-toggle::before { content: '▾ '; }
 .feedback-real { margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); }
 .trainer-practice-link { font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--sp-3); }
 .trainer-practice-link a { color: var(--accent); }
+/* Play progress (Progress tab) */
+.prog-play { margin-bottom: var(--sp-6); }
+.prog-th-sub { font-size: 10px; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
+.prog-ci { font-size: 10px; color: var(--text-muted); white-space: nowrap; }

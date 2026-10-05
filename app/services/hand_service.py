@@ -396,6 +396,7 @@ async def hand_records_for_player(
             tournament_name=hand.tournament_name,
             blind_level=hand.blind_level_index,
             busted=hero_hp.ending_stack is not None and hero_hp.ending_stack == 0,
+            played_at=hand.hand_started_at,
         )
         records.append(record)
         contexts[hand.external_id] = HandContext(

@@ -340,12 +340,20 @@ class HandHistoryParser:
                         "big blind": "POST_BB",
                         "ante": "POST_ANTE",
                     }
+                    amount = Decimal(m.group("amount").replace(",", ""))
+                    # GGPoker tournament headers omit the ante, so take it from
+                    # the posts. Use the largest post: a short stack may post
+                    # a partial ante.
+                    if blind_type == "ante" and (
+                        h.stakes_ante is None or amount > h.stakes_ante
+                    ):
+                        h.stakes_ante = amount
                     h.actions.append(
                         {
                             "player_username": m.group("username"),
                             "street": "PREFLOP",
                             "action_type": action_map[blind_type],
-                            "amount": str(Decimal(m.group("amount").replace(",", ""))),
+                            "amount": str(amount),
                             "is_all_in": False,
                             "action_order": action_order,
                         }

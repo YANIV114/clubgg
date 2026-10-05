@@ -387,6 +387,60 @@ class TestActionOrdering:
             assert max(river_orders) < min(show_orders)
 
 
+# ── GGPoker tournament format ─────────────────────────────────────────────────
+
+# Synthetic hand in the GGPoker/ClubGG tournament export format. The ante is
+# not in the header (only "Level14(600/1,200)"); it appears only as
+# "posts the ante" lines in the preamble.
+_GG_TOURNAMENT_HAND = """\
+Poker Hand #tour_900000001: Tournament #1000001, Test GTD NLH No Limit - Level14(600/1,200) - 2026/04/18 23:23:51
+Table '' 8-max Seat #2 is the button
+Seat 1: aaaa1111 (50,000 in chips)
+Seat 2: bbbb2222 (40,000 in chips)
+Seat 4: cccc3333 (30,000 in chips)
+Seat 5: Hero (16,200 in chips)
+aaaa1111: posts the ante 180
+bbbb2222: posts the ante 180
+cccc3333: posts the ante 180
+Hero: posts the ante 180
+cccc3333: posts small blind 600
+Hero: posts big blind 1,200
+*** HOLE CARDS ***
+Dealt to aaaa1111
+Dealt to bbbb2222
+Dealt to cccc3333
+Dealt to Hero [Qh 4h]
+aaaa1111: folds
+bbbb2222: raises 1,440 to 2,640
+cccc3333: folds
+Hero: folds
+bbbb2222 collected 4,560 from pot
+*** SUMMARY ***
+Total pot 4,560
+Seat 1: aaaa1111 folded before Flop
+Seat 2: bbbb2222 won (4,560)
+Seat 4: cccc3333(small blind) folded before Flop
+Seat 5: Hero(big blind) folded before Flop
+"""
+
+
+class TestGGTournamentFormat:
+    def test_blinds_parsed_from_level(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_TOURNAMENT_HAND)
+        assert Decimal(result["stakes_sb"]) == Decimal("600")
+        assert Decimal(result["stakes_bb"]) == Decimal("1200")
+
+    def test_ante_taken_from_post_ante_lines(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_TOURNAMENT_HAND)
+        assert result["stakes_ante"] is not None
+        assert Decimal(result["stakes_ante"]) == Decimal("180")
+
+    def test_ante_posts_recorded_as_actions(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_TOURNAMENT_HAND)
+        antes = [a for a in result["actions"] if a["action_type"] == "POST_ANTE"]
+        assert len(antes) == 4
+
+
 # ── Invalid input ─────────────────────────────────────────────────────────────
 
 

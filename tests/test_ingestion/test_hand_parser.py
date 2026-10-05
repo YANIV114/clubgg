@@ -526,6 +526,26 @@ class TestTournamentContext:
         assert result["blind_level_index"] is None
 
 
+class TestGGNetworkHeader:
+    """GGPoker network exports (e.g. WSOP Online): ante inside the level parens."""
+
+    _HEADER = (
+        'Poker Hand #TM6486474282: Tournament #317190959, $100 Sunday "Ocean KO" '
+        "Hold'em No Limit - Level5(125/250(35)) - 2026/10/04 22:28:11"
+    )
+
+    def test_level_with_ante_in_parens(self, parser: HandHistoryParser) -> None:
+        block = _GG_TOURNAMENT_HAND.replace(_GG_TOURNAMENT_HAND.splitlines()[0], self._HEADER)
+        result = parser.parse(block)
+        assert result["external_id"] == "TM6486474282"
+        assert Decimal(result["stakes_sb"]) == Decimal("125")
+        assert Decimal(result["stakes_bb"]) == Decimal("250")
+        assert result["blind_level_index"] == 5
+        assert result["tournament_external_id"] == "317190959"
+        assert result["tournament_name"] == '$100 Sunday "Ocean KO"'
+        assert result["game_type"] == "NLH"
+
+
 class TestActionLines:
     """An action line must never swallow the start of the next line."""
 

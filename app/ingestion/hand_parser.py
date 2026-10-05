@@ -66,7 +66,8 @@ _HEADER_RE = re.compile(
 _HEADER_GG_RE = re.compile(
     r"Poker Hand #(?P<hand_id>\S+):\s+(?P<game_desc>.+?)\s+No Limit"
     r"(?:"
-    r"\s+-\s+Level(?P<level>\d+)\((?P<sb>[\d,]+)/(?P<bb>[\d,]+)(?:/[\d,]+)?\)"  # tournament: " - Level12(750/1,500)"
+    # tournament: " - Level12(750/1,500)"; GG network adds the ante: " - Level5(125/250(35))"
+    r"\s+-\s+Level(?P<level>\d+)\((?P<sb>[\d,]+)/(?P<bb>[\d,]+)(?:/[\d,]+|\([\d,]+\))?\)"
     r"|"
     r"\s+\(\$(?P<sb2>[\d,]+(?:\.\d+)?)/\$(?P<bb2>[\d,]+(?:\.\d+)?)\)"  # cash: " ($1/$2)"
     r")\s+-\s+"

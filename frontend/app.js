@@ -3673,12 +3673,21 @@ function renderImport() {
     const form = new FormData();
     selectedFiles.forEach(f => form.append('files', f));
 
-    const loggedIn = authIsLoggedIn();
+    let loggedIn = authIsLoggedIn();
     const endpoint = loggedIn ? `${API}/me/import` : `${API}/ingest/upload`;
     const headers = loggedIn ? _coAuthHeaders() : {};
 
     try {
-      const res = await fetch(endpoint, { method: 'POST', body: form, headers });
+      let res = await fetch(endpoint, { method: 'POST', body: form, headers });
+      if (loggedIn && res.status === 401) {
+        // Stale or expired login: drop it and import without an account
+        // instead of failing the whole upload.
+        authClearToken();
+        authClearUser();
+        if (typeof authUpdateNav === 'function') authUpdateNav();
+        loggedIn = false;
+        res = await fetch(`${API}/ingest/upload`, { method: 'POST', body: form });
+      }
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
         try { detail = (await res.json()).detail || detail; } catch (_) {}

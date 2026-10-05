@@ -93,6 +93,30 @@ Table 'Diamond 1' 6-max Seat #3 is the button
 ...
 ```
 
+### Real exports: GGPoker / ClubGG tournament format
+All real hand histories so far use the GGPoker export format, not the ClubGG header above:
+```
+Poker Hand #tour_441844252: Tournament #3317780, 200K GTD ♠ FROZEN THRONE HR ♠ RE NLH No Limit - Level14(600/1,200) - 2026/04/18 23:23:51
+Table '' 8-max Seat #2 is the button
+Seat 7: 72467275 (74,397 in chips)
+72467275: posts the ante 180
+...
+Uncalled bet (9,600) returned to 589f9da2
+*** SHOWDOWN ***
+589f9da2 collected 19,622 from pot
+```
+Parser facts learned from validating against 1,912 real hands:
+- Player names are hex ids, often starting with a digit. Action regexes must use `[ \t]+`,
+  never `\s+` (which crosses newlines and swallows the next line).
+- The ante is only in `posts the ante` lines; the header has no ante.
+- Tournament id/name and blind level come from the header; there is NO players-remaining or
+  payout data, so bubble / ITM can't be derived.
+- `ending_stack`/`net_won` are computed per hand (collected − put in, uncalled bets returned) and
+  stored only when the hand reconciles (chips in == collected + rake).
+
+**After any parser change**, re-derive stored hands from `raw_text` (re-import skips duplicates):
+`pg_dump clubgg > backup.sql && uv run python scripts/rebuild_hands.py`
+
 ### Manual Triggers
 ```
 POST /api/v1/ingest/api/trigger   — trigger API ingest for a club + domain list
@@ -148,3 +172,14 @@ chip_transactions → players / agents / hands
 
 ingest_checkpoints  (club_id, domain) → last_fetched_at
 ```
+
+## Analysis Layers
+- `app/features/leaks.py` — stat-based leaks via `analyze_leaks()`: tournament (ante) baselines,
+  hands under 20bb effective excluded.
+- `app/analysis/hand_analysis_engine.py` + `leak_finder.py` — per-hand decisions (push/fold,
+  calling shoves). Avoid spot types that only cover hands ending preflop for frequency leaks:
+  their samples are biased toward folds.
+- `app/features/results.py` / `tournaments.py` — chip results with 95% margins; per-tournament
+  summaries and blind-level phases.
+- `app/analysis/drills.py` — real-spot drills (facing a single raise) for the Trainer.
+

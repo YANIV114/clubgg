@@ -2431,7 +2431,6 @@ function renderFaceDownCard() {
 }
 
 function renderPokerTable(drill, phase) {
-  console.log('[TRAINER] renderPokerTable (old analysis trainer)', { ctx: drill.ctx, phase });
   const ctx   = parseCtx(drill.ctx);
   const hp    = ctx.heroPos || 'BTN';
   const stack = ctx.eff || ctx.stack || '?';
@@ -2475,11 +2474,7 @@ function renderPokerTable(drill, phase) {
     return `<div class="${cls}" style="left:${c.left}%;top:${c.top}%">${inner}</div>`;
   }).join('');
 
-  const debugBar = `<div style="background:#312e81;border:1px solid #6366f1;border-radius:4px;padding:4px 8px;font-size:10px;color:#a5b4fc;font-family:monospace;margin-bottom:6px">
-    RENDERER: renderPokerTable &nbsp;|&nbsp; ctx: ${escHtml(drill.ctx || '?')} &nbsp;|&nbsp; phase: ${escHtml(phase || '?')}
-  </div>`;
-
-  return `${debugBar}<div class="poker-table-wrap">
+  return `<div class="poker-table-wrap">
     <div class="poker-table-felt">
       <div class="table-pot"><div class="table-pot-lbl">pot</div><div class="table-pot-amt">${potBb}bb</div></div>
     </div>
@@ -2937,11 +2932,9 @@ function renderTrainer() {
   const panel = els.trainerPanel();
   if (!panel) return;
 
-  // Debug banner so user can distinguish old vs new trainer
-  const _oldTrainerBanner = `<div style="background:#1e1b4b;border:2px solid #6366f1;border-radius:8px;padding:8px 14px;font-size:12px;color:#a5b4fc;margin-bottom:10px;font-family:monospace">
-    &#9888; OLD TRAINER (Analysis &gt; Trainer tab) &mdash; Leak-based preflop drills only.<br>
-    &#127909; <strong style="color:#c4b5fd">Looking for Replay Drills?</strong>
-    <a href="#" onclick="spNavigate('/trainer?mode=replay-drill');return false;" style="color:#818cf8;text-decoration:underline">Click here to open the Practice page</a>
+  const _oldTrainerBanner = `<div class="trainer-practice-link">
+    Looking for replay drills?
+    <a href="#" onclick="spNavigate('/trainer?mode=replay-drill');return false;">Open the Practice page</a>
   </div>`;
 
   // Daily coach — plan screen
@@ -3464,7 +3457,6 @@ function renderDrill() {
   const { drills, idx, score, answered, chosen, phase } = trainerState;
   const drill = drills[idx];
   const total = drills.length;
-  console.log('[TRAINER] renderDrill (old analysis trainer)', { lk: drill.lk, hand: drill.hand, ctx: drill.ctx });
 
   const leakCtx = drill.leak_title
     ? `<span class="trainer-leak-ctx">Leak ${drill.group_num}/${drill._total_groups}: ${escHtml(drill.leak_title)} &middot; Drill ${drill.drill_in_group}/${drill.group_size}</span>`
@@ -12411,12 +12403,8 @@ function trLoadScenario() {
   const colsClass = `tr-actions--${s.options.length}`;
   const qIdx = `${_trSession.queueIdx}/${_trSession.queue.length}`;
 
-  console.log('[TRAINER] general scenario renderer', { id: s.id, type: s.type, mode: s.mode });
   board.innerHTML = `
     <div class="tr-scenario" id="tr-scenario">
-      <div style="background:#14532d;border:1px solid #16a34a;border-radius:6px;padding:6px 10px;font-size:11px;color:#86efac;margin-bottom:8px;font-family:monospace">
-        RENDERER: general-scenario &nbsp;|&nbsp; id: ${escHtml(s.id)} &nbsp;|&nbsp; mode: ${escHtml(s.mode || '?')} &nbsp;|&nbsp; type: ${escHtml(s.type || '?')}
-      </div>
       <div class="tr-scenario-context">
         <span class="tr-stage-badge ${_trStageClass(s.stage)}">${escHtml(s.stage_label)}</span>
         <span class="tr-context-detail">${escHtml(s.stage_detail)}</span>
@@ -12735,7 +12723,6 @@ function _trRenderReplayDrill(board, s) {
   const colsClass = `tr-actions--${s.options.length}`;
   const state = buildTrainerHandState(s);
   const { seats, potBb, boardCards, actionLog } = state;
-  console.log('[TRAINER] _trRenderReplayDrill', { id: s.id, seats: seats.length, potBb, actions: actionLog.length });
 
   const villainPos = _trRdPrimaryVillain(s);
   const currentStreet = boardCards.length === 0 ? null
@@ -12827,9 +12814,6 @@ function _trRenderReplayDrill(board, s) {
 
   board.innerHTML = `
     <div class="tr-scenario tr-scenario--replay-drill" id="tr-scenario">
-      <div style="background:#1e1b4b;border:1px solid #6366f1;border-radius:6px;padding:6px 10px;font-size:11px;color:#a5b4fc;margin-bottom:8px;font-family:monospace">
-        RENDERER: _trRenderReplayDrill &nbsp;|&nbsp; id: ${escHtml(s.id)} &nbsp;|&nbsp; seats: ${seats.length} &nbsp;|&nbsp; pot: ${potBb.toFixed(1)}bb &nbsp;|&nbsp; actions: ${actionLog.length}
-      </div>
       <div class="tr-scenario-context">
         <span class="tr-replay-badge">&#127909; Replay Drill</span>
         <span class="tr-stage-badge ${_trStageClass(s.stage)}">${escHtml(s.stage_label)}</span>

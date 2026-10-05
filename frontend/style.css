@@ -12337,3 +12337,5 @@ details[open] .rv-limitations-toggle::before { content: '▾ '; }
 .trainer-real-btn { margin-top: var(--sp-3); }
 .trainer-real-desc { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-2); }
 .feedback-real { margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); }
+.trainer-practice-link { font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--sp-3); }
+.trainer-practice-link a { color: var(--accent); }

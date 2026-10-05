@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from app.analysis.hand_analysis_engine import analyze_hand
+from app.analysis.hand_analysis_engine import HandAnalysisResult, analyze_hand
 from app.analysis.nash_pushfold import (
     NASH_BACKING,
     NASH_CALL_RANGES,
@@ -49,6 +49,7 @@ def _hand(
     opp_actions: list[tuple] = (),
     stakes_bb: Decimal = Decimal("1"),
     hole_cards: str | None = None,
+    opp_stack_bb: Decimal = Decimal("25"),
 ) -> tuple[HandDetailOut, uuid.UUID]:
     """Build a minimal HandDetailOut + hero_player_id for testing."""
     hero_id = uuid.uuid4()
@@ -103,14 +104,14 @@ def _hand(
             HandPlayerOut(
                 player_id=opp_id,
                 seat_number=seat_idx,
-                starting_stack=Decimal("25"),
+                starting_stack=(opp_stack_bb * stakes_bb).quantize(Decimal("0.0001")),
                 ending_stack=None,
                 hole_cards=None,
                 did_show=False,
                 net_won=None,
                 position=opp_pos,
-                stack_bb=Decimal("25"),
-                effective_stack_bb=Decimal("25"),
+                stack_bb=opp_stack_bb,
+                effective_stack_bb=opp_stack_bb,
                 username=f"opp_{opp_pos}",
                 actions=opp_action_outs,
             )
@@ -569,6 +570,105 @@ class TestNashIntegration:
         assert "Nash" in result.range_context, (
             f"'Nash' not in range_context: {result.range_context!r}"
         )
+
+    def _call_vs_shove(self, hero_bb: str, shover_bb: str) -> HandAnalysisResult:
+        hand, hero_id = _hand(
+            position="BB",
+            stack_bb=Decimal(hero_bb),
+            actions=[
+                ("PREFLOP", "POST_BB", "1", False, 1),
+                ("PREFLOP", "CALL", shover_bb, False, 10),
+            ],
+            opp_actions=[("BTN", "PREFLOP", "ALL_IN", shover_bb, True, 5)],
+            opp_stack_bb=Decimal(shover_bb),
+            hole_cards="7h 2c",
+        )
+        return analyze_hand(hand, hero_id)
+
+    def test_call_allin_depth_is_effective_stack(self):
+        """Deep hero vs 10bb shover: the call is a 10bb spot, not a 40bb one."""
+        result = self._call_vs_shove(hero_bb="40", shover_bb="10")
+        assert "10bb" in result.range_context, result.range_context
+        assert result.hero_range_position == "outside"
+
+    def test_call_allin_not_judged_when_effective_stack_too_deep(self):
+        """Nash tables stop at 15bb; a 30bb-effective call must not be judged by them."""
+        result = self._call_vs_shove(hero_bb="57", shover_bb="30")
+        assert result.spot_type == "call_all_in"
+        assert result.hero_range_position == "unknown"
+        assert result.backing != NASH_BACKING
+
+    def test_call_allin_not_judged_vs_tiny_shove(self):
+        """Calling a 2bb shove is a pot-odds call; the 5bb table would over-flag it."""
+        result = self._call_vs_shove(hero_bb="57", shover_bb="2")
+        assert result.hero_range_position == "unknown"
+
+    def test_call_allin_multiway_not_judged(self):
+        """Overcalling a shove after another caller isn't a heads-up Nash spot."""
+        hand, hero_id = _hand(
+            position="BB",
+            stack_bb=Decimal("10"),
+            actions=[
+                ("PREFLOP", "POST_BB", "1", False, 1),
+                ("PREFLOP", "CALL", "10", False, 10),
+            ],
+            opp_actions=[
+                ("UTG", "PREFLOP", "ALL_IN", "10", True, 5),
+                ("CO", "PREFLOP", "CALL", "10", False, 7),
+            ],
+            opp_stack_bb=Decimal("10"),
+            hole_cards="Qh Jc",
+        )
+        result = analyze_hand(hand, hero_id)
+        assert result.spot_type == "call_all_in"
+        assert result.hero_range_position == "unknown"
+
+    def test_call_allin_uses_shover_before_hero(self):
+        """A player who goes all-in after hero's call is not the shover hero faced."""
+        hand, hero_id = _hand(
+            position="BB",
+            stack_bb=Decimal("10"),
+            actions=[
+                ("PREFLOP", "POST_BB", "1", False, 1),
+                ("PREFLOP", "CALL", "10", False, 10),
+            ],
+            # CO listed first so it precedes BTN in hand_players.
+            opp_actions=[
+                ("CO", "PREFLOP", "ALL_IN", "10", True, 12),
+                ("BTN", "PREFLOP", "ALL_IN", "10", True, 5),
+                ("SB", "PREFLOP", "FOLD", None, False, 6),
+            ],
+            opp_stack_bb=Decimal("10"),
+            hole_cards="Qh Jc",
+        )
+        result = analyze_hand(hand, hero_id)
+        assert "vs BTN" in result.range_context, result.range_context
+
+    def _call_raise(self, position: str, hero_bb: str) -> HandAnalysisResult:
+        hero_actions = [("PREFLOP", "CALL", "2.2", False, 10)]
+        if position == "BB":
+            hero_actions.insert(0, ("PREFLOP", "POST_BB", "1", False, 1))
+        hand, hero_id = _hand(
+            position=position,
+            stack_bb=Decimal(hero_bb),
+            actions=hero_actions,
+            opp_actions=[("BTN", "PREFLOP", "RAISE", "2.2", False, 5)],
+            player_count=8,
+        )
+        return analyze_hand(hand, hero_id)
+
+    def test_bb_calling_single_raise_at_13bb_is_not_a_mistake(self):
+        """BB defend by calling a min-raise is standard at 13bb (pot odds + antes)."""
+        result = self._call_raise("BB", "13")
+        assert result.mistake_severity not in ("critical", "major")
+
+    def test_bb_calling_single_raise_at_8bb_is_minor(self):
+        result = self._call_raise("BB", "8")
+        assert result.mistake_severity == "minor"
+
+    def test_non_blind_flat_call_short_is_still_a_mistake(self):
+        result = self._call_raise("CO", "12")
+        assert result.mistake_severity in ("critical", "major")
 
     def test_bubble_icm_spot_stays_speculative_with_nash(self):
         """bubble_icm spots must stay SPECULATIVE even when Nash range is used."""

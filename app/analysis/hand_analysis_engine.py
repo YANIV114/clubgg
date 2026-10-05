@@ -64,6 +64,10 @@ _D40 = Decimal("40")
 _D100 = Decimal("100")
 _D2 = Decimal("2")
 
+# Effective-stack band (bb) where Nash call tables (5–15bb) are trusted.
+_CALL_RANGE_MIN_BB = 4.0
+_CALL_RANGE_MAX_BB = 18.0
+
 # Minimum hands in a session to consider ICM spots plausible
 _ICM_MIN_HANDS = 20
 
@@ -416,6 +420,35 @@ def _analyze_push_fold(
             key_factors=_build_key_factors(hero_hp, hand, ["first-in"] + extras),
             confidence=MetricLabel.INFERRED,
             ev_label="+EV",
+            backing="range-based estimate",
+        )
+
+    bb_vs_single_raise = pos == "BB" and _raises_before(hand, hero_hp, "PREFLOP") == 1
+    if t == "CALL" and not is_all_in and bb_vs_single_raise:
+        # BB facing a single (non-all-in) raise already has 1bb (plus antes) in
+        # the pot and closes the action: calling is a standard defend, not a
+        # push/fold error.  At ≤10bb a reshove usually does better.
+        severity = "minor" if stack_bb <= _D10 else "none"
+        return HandAnalysisResult(
+            spot_type="push_fold"
+            if not icm_note
+            else ("final_table_icm" if stack_bb <= _D10 else "bubble_icm"),
+            hero_action=hero_desc,
+            recommended_action="call or reshove" if severity == "none" else "reshove or fold",
+            mistake_severity=severity,
+            explanation=(
+                f"BB defending a single raise with {stack_str}. The BB gets a good "
+                "price and closes the action, so calling can be correct"
+                + (
+                    "; at this depth a reshove usually captures more fold equity."
+                    if severity == "minor"
+                    else "."
+                )
+                + (f" {icm_note}" if icm_note else "")
+            ),
+            key_factors=_build_key_factors(hero_hp, hand, extras),
+            confidence=MetricLabel.INFERRED,
+            ev_label="neutral",
             backing="range-based estimate",
         )
 
@@ -1103,32 +1136,55 @@ def _augment_with_range(
             range_label = f"{pos} 3-bet range vs {vs_pos} ({len(range_set)} combos)"
 
     elif spot == "call_all_in":
-        # Find the all-in raiser
-        shover_hp = next(
-            (
-                hp
-                for hp in hand.hand_players
-                if hp.player_id != hero_hp.player_id
-                and any(_is_all_in_action(a) for a in hp.actions if a.street == "PREFLOP")
-            ),
-            None,
+        # The shover hero faced: the latest opponent all-in before hero's call.
+        hero_pf = [
+            a
+            for a in hero_hp.actions
+            if a.street == "PREFLOP" and a.action_type not in _SKIP_POSTING
+        ]
+        hero_call_order = max((a.action_order for a in hero_pf), default=0)
+        opp_pf = [
+            (hp, a)
+            for hp in hand.hand_players
+            if hp.player_id != hero_hp.player_id
+            for a in hp.actions
+            if a.street == "PREFLOP" and a.action_order < hero_call_order
+        ]
+        shoves = [(hp, a) for hp, a in opp_pf if _is_all_in_action(a)]
+        shover_hp = max(shoves, key=lambda x: x[1].action_order)[0] if shoves else None
+        # Nash call tables are heads-up.  Any other opponent putting money in
+        # voluntarily (an opener, an overcaller) changes the price and ranges.
+        others_in = any(
+            hp is not shover_hp and a.action_type in ("CALL", "RAISE", "BET", "ALL_IN", "ALLIN")
+            for hp, a in opp_pf
         )
-        vs_pos = (shover_hp.position or "UTG").upper() if shover_hp else "UTG"
+        if shover_hp is None or others_in:
+            return result
+        vs_pos = (shover_hp.position or "UTG").upper()
+        # The call is for the smaller of the two stacks, not hero's own stack.
+        eff = stack
+        if shover_hp is not None and shover_hp.stack_bb is not None:
+            eff = min(stack, float(shover_hp.stack_bb))
+        # Nash call tables cover 5–15bb.  Outside that band (deep calls, or tiny
+        # shoves that are pure pot-odds calls) the nearest table would misjudge
+        # the hand, so leave it unevaluated rather than report a false leak.
+        if not _CALL_RANGE_MIN_BB <= eff <= _CALL_RANGE_MAX_BB:
+            return result
         # Try Nash call range first
-        nash_set, nash_key = get_nash_call_range("BB", vs_pos, stack)
+        nash_set, nash_key = get_nash_call_range("BB", vs_pos, eff)
         if nash_key:
             range_set = nash_set
             range_key = nash_key
             range_label = (
-                f"Nash call range vs {vs_pos} shove at {int(stack)}bb ({len(range_set)} combos)"
+                f"Nash call range vs {vs_pos} shove at {int(eff)}bb ({len(range_set)} combos)"
             )
             backing_override = NASH_BACKING
         else:
             # Fallback to range_library
-            range_set, range_key = get_call_range("BB", vs_pos, stack)
+            range_set, range_key = get_call_range("BB", vs_pos, eff)
             if range_key:
                 range_label = (
-                    f"call range vs {vs_pos} shove at {int(stack)}bb ({len(range_set)} combos)"
+                    f"call range vs {vs_pos} shove at {int(eff)}bb ({len(range_set)} combos)"
                 )
 
     # ── Compute range position ──────────────────────────────────────────────

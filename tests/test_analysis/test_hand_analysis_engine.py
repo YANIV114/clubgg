@@ -346,12 +346,10 @@ class TestDefendBB:
         assert result.spot_type == "defend_bb"
         assert result.mistake_severity == "none"
 
-    def test_short_stack_call_is_minor_mistake(self):
-        # Per classification priority 1: stack ≤ 15bb + preflop voluntary action → push_fold.
-        # push_fold overrides defend_bb for short stacks.
-        # Stack exactly 12bb (≤ 15bb but > 10bb) → major mistake; defend_bb
-        # logic applies only for stacks > 15bb in isolation.
-        # Here we use 12bb to get push_fold + major (not critical).
+    def test_short_stack_call_is_not_a_mistake(self):
+        # Per classification priority 2: stack ≤ 15bb + preflop voluntary action → push_fold.
+        # push_fold overrides defend_bb for short stacks, but BB calling a single
+        # non-all-in raise is a standard defend, so it is not flagged above 10bb.
         hand, hero_id = _hand(
             position="BB",
             stack_bb=Decimal("12"),
@@ -362,9 +360,8 @@ class TestDefendBB:
             opp_actions=[("BTN", "PREFLOP", "RAISE", "2.5", False, 5)],
         )
         result = analyze_hand(hand, hero_id)
-        # push_fold wins over defend_bb for short stacks (classification priority 1)
         assert result.spot_type == "push_fold"
-        assert result.mistake_severity == "major"
+        assert result.mistake_severity == "none"
 
     def test_3bet_is_good(self):
         # BB re-raises facing a BTN steal → classified as defend_bb (BB defence

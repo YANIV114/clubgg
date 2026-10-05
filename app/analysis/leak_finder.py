@@ -38,6 +38,7 @@ _PUSH_FOLD_SPOTS = frozenset({"push_fold", "bubble_icm", "final_table_icm"})
 _STEAL_FOLD_THRESHOLD = Decimal("0.65")  # folding > 65% of first-in steal spots
 _BB_FOLD_THRESHOLD = Decimal("0.72")  # folding > 72% of BB defense spots
 _BUBBLE_FOLD_THRESHOLD = Decimal("0.55")  # folding > 55% of bubble spots with 10–20bb
+_FLAT_CALL_CRITICAL_RATE = 0.10  # flat calls in ≥10% of short-stack spots → critical
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +239,10 @@ def _detect_flat_calling_short_stack(
 
     rate = n_mistakes / n
     confidence = _confidence_tier(n_mistakes)
-    severity = _cap_severity("critical" if n_mistakes >= 5 else "major", confidence)
+    # Critical needs both repetition and a meaningful share of short-stack spots;
+    # a handful of flat calls across many spots is a real but secondary leak.
+    is_critical = n_mistakes >= 5 and rate >= _FLAT_CALL_CRITICAL_RATE
+    severity = _cap_severity("critical" if is_critical else "major", confidence)
 
     evidence = [
         f"Hand {r.hand_external_id}: {r.result.spot_type} — {r.result.hero_action} "

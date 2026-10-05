@@ -73,7 +73,7 @@ class PlayerResults:
     cumulative_bb: list[Decimal]  # running total, downsampled to ≤200 points
 
 
-def _rate(values: Sequence[Decimal]) -> ResultRate:
+def bb_per_100_rate(values: Sequence[Decimal]) -> ResultRate:
     n = len(values)
     if n == 0:
         return ResultRate(value=None, n=0, margin=None, significant=False)
@@ -93,7 +93,7 @@ def _row(label: str, values: Sequence[Decimal]) -> ResultRow:
         label=label,
         hands=len(values),
         total_bb=sum(values, Decimal("0")).quantize(_BB),
-        bb_per_100=_rate(values),
+        bb_per_100=bb_per_100_rate(values),
     )
 
 
@@ -138,7 +138,7 @@ def compute_results(records: Sequence[HandRecord]) -> PlayerResults:
         hand_count=len(known),
         hands_without_result=len(records) - len(known),
         total_bb=sum(nets, Decimal("0")).quantize(_BB),
-        bb_per_100=_rate(nets),
+        bb_per_100=bb_per_100_rate(nets),
         by_position=[_row(p, by_pos[p]) for p in sorted(by_pos, key=pos_key)],
         by_depth=[_row(label, by_depth[label]) for label, _ in _DEPTH_BUCKETS if label in by_depth],
         cumulative_bb=_downsample(curve),

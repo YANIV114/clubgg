@@ -334,3 +334,23 @@ async def test_drills_shape(async_client: AsyncClient, alice: Player) -> None:
     assert data["mistakes"] == sum(data["mistakes_by_position"].values())
     for spot in data["spots"]:
         assert spot["recommendation"]["best"] in spot["recommendation"]["acceptable"]
+
+
+# ── Tournaments ───────────────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+async def test_tournaments_404_unknown_player(async_client: AsyncClient, ingested: None) -> None:
+    resp = await async_client.get(
+        "/api/v1/players/00000000-0000-0000-0000-000000000000/tournaments"
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_tournaments_cash_fixture_has_none(async_client: AsyncClient, alice: Player) -> None:
+    # The fixture hands are cash games: no tournament, no blind level.
+    data = (await async_client.get(f"/api/v1/players/{alice.id}/tournaments")).json()
+    assert data["tournaments"] == []
+    assert data["phases"] == []
+    assert data["hands_without_tournament"] == 4

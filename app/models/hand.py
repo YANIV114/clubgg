@@ -83,6 +83,11 @@ class Hand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Which seat held the dealer button this hand.
     # Required for position computation. NULL when unavailable (older API data).
     button_seat: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    # Tournament this hand belongs to (from the hand header; null = cash / unknown).
+    tournament_external_id: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, index=True
+    )
+    tournament_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Blind level index within the tournament structure (null = cash / unknown).
     blind_level_index: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     # Players remaining in tournament at start of this hand (null = cash / unknown).

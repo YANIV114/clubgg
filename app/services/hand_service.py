@@ -49,6 +49,8 @@ async def upsert_hand(session: AsyncSession, payload: IngestHandPayload) -> None
         "button_seat": payload.button_seat,
         "blind_level_index": payload.blind_level_index,
         "players_remaining": payload.players_remaining,
+        "tournament_external_id": payload.tournament_external_id,
+        "tournament_name": payload.tournament_name,
     }
     hand_stmt = (
         insert(Hand)
@@ -386,7 +388,15 @@ async def hand_records_for_player(
             if hero_hp.net_won is not None and hand.stakes_bb
             else None
         )
-        record = dataclasses.replace(record, has_ante=bool(hand.stakes_ante), net_bb=net_bb)
+        record = dataclasses.replace(
+            record,
+            has_ante=bool(hand.stakes_ante),
+            net_bb=net_bb,
+            tournament_id=hand.tournament_external_id,
+            tournament_name=hand.tournament_name,
+            blind_level=hand.blind_level_index,
+            busted=hero_hp.ending_stack is not None and hero_hp.ending_stack == 0,
+        )
         records.append(record)
         contexts[hand.external_id] = HandContext(
             board_cards=hand.board_cards,

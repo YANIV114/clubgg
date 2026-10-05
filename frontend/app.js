@@ -13,6 +13,7 @@ let statsData = null;
 let leaksData = null;
 let leakReportData = null;  // per-hand findings; null if unavailable
 let resultsData = null;     // chip results by position / depth; null if unavailable
+let tournamentsData = null; // per-tournament summaries + phases; null if unavailable
 let planData = null;
 let sampleData = null;
 let activeTab = 'home';
@@ -529,6 +530,7 @@ async function loadPlayer(id) {
   leaksData = null;
   leakReportData = null;
   resultsData = null;
+  tournamentsData = null;
   planData = null;
   sampleData = null;
   leakFilter = 'all';
@@ -539,7 +541,7 @@ async function loadPlayer(id) {
   showLoadingInPanels();
 
   try {
-    [statsData, leaksData, sampleData, leakReportData, resultsData] = await Promise.all([
+    [statsData, leaksData, sampleData, leakReportData, resultsData, tournamentsData] = await Promise.all([
       apiFetch(`/players/${encodeURIComponent(id)}/stats`),
       apiFetch(`/players/${encodeURIComponent(id)}/leaks`),
       apiFetch(`/players/${encodeURIComponent(id)}/sample`),
@@ -547,6 +549,7 @@ async function loadPlayer(id) {
       // limit=1000 matches the /leaks default so both sections cover the same hands.
       apiFetch(`/players/${encodeURIComponent(id)}/leak-report?limit=1000`).catch(() => null),
       apiFetch(`/players/${encodeURIComponent(id)}/results`).catch(() => null),
+      apiFetch(`/players/${encodeURIComponent(id)}/tournaments`).catch(() => null),
     ]);
 
     if (activeEl) {
@@ -559,7 +562,7 @@ async function loadPlayer(id) {
     renderHome();
     renderStats(statsData);
     renderLeaks(leaksData);
-    renderResults(resultsData);
+    renderResults(resultsData, tournamentsData);
     clearPanel(els.planPanel(), renderPlanEmpty);
     trainerState = null;
     renderTrainer();
@@ -569,6 +572,7 @@ async function loadPlayer(id) {
     leaksData = null;
     leakReportData = null;
     resultsData = null;
+    tournamentsData = null;
     sampleData = null;
     if (activeEl) activeEl.innerHTML = `<span style="color:var(--red)">Load failed — ${escHtml(err.message)}</span>`;
     showErrorInPanels(err.message);
@@ -1545,7 +1549,70 @@ function _bindResultCurve(panel) {
   });
 }
 
-function renderResults(data) {
+function _pct1(m) {
+  return m && m.value != null ? `${(parseFloat(m.value) * 100).toFixed(0)}%` : '—';
+}
+
+function _renderPhaseTable(phases) {
+  if (!phases || !phases.length) return '';
+  const body = phases.map(p => {
+    const b = p.bb_per_100;
+    return `<tr>
+      <td>${escHtml(p.label)}</td>
+      <td class="num">${escHtml(p.hands)}</td>
+      <td class="num">${escHtml(_pct1(p.vpip))}</td>
+      <td class="num">${escHtml(_pct1(p.pfr))}</td>
+      <td class="num">${escHtml(_pct1(p.three_bet_pct))}</td>
+      <td class="num ${_resultCls(b)}">${escHtml(_fmtBb(b.value))}</td>
+      <td class="num text-secondary">${b.margin != null ? '±' + escHtml(parseFloat(b.margin).toFixed(0)) : '—'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="results-block">
+    <div class="results-block-title">By tournament phase (blind level) — how your play changes as the tournament goes on</div>
+    <table class="results-table">
+      <thead><tr>
+        <th>Phase</th><th class="num">Hands</th><th class="num">VPIP</th><th class="num">PFR</th>
+        <th class="num">3-bet</th><th class="num">bb/100</th><th class="num">95% margin</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <div class="results-note">Phases are blind-level bands, a rough proxy: level numbering differs between
+    structures. Bubble / in-the-money can't be detected — hand histories don't include players remaining or payouts.</div>
+  </div>`;
+}
+
+function _renderTournamentTable(tournaments) {
+  if (!tournaments || !tournaments.length) return '';
+  const body = tournaments.map(t => {
+    const levels = t.first_level != null
+      ? (t.first_level === t.last_level ? `${t.first_level}` : `${t.first_level}–${t.last_level}`)
+      : '—';
+    return `<tr>
+      <td>${escHtml(t.name || '#' + t.tournament_id)}</td>
+      <td class="text-secondary">${escHtml(t.format_hint || '')}</td>
+      <td class="num">${escHtml(t.hands)}</td>
+      <td class="num">${escHtml(levels)}</td>
+      <td class="num">${escHtml(t.entries)}</td>
+      <td class="num">${escHtml(_fmtBb(t.total_bb, 0))}</td>
+    </tr>`;
+  }).join('');
+  const entries = tournaments.reduce((n, t) => n + t.entries, 0);
+  return `<div class="results-block">
+    <div class="results-block-title">Tournaments — ${escHtml(tournaments.length)} tournaments, ${escHtml(entries)} entries</div>
+    <table class="results-table">
+      <thead><tr>
+        <th>Tournament</th><th>Format</th><th class="num">Hands</th><th class="num">Levels</th>
+        <th class="num">Entries</th><th class="num">Chips (bb)</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <div class="results-note">Chip results only: finishing place and prize money aren't in the hand
+    histories, and bounty winnings aren't counted. Busting out doesn't mean you didn't cash.
+    Format is guessed from the tournament name.</div>
+  </div>`;
+}
+
+function renderResults(data, tournaments) {
   const panel = els.resultsPanel();
   if (!panel) return;
   if (!data) {
@@ -1575,6 +1642,10 @@ function renderResults(data) {
   html += _renderResultCurve(data.cumulative_bb, data.hand_count);
   html += _renderResultTable('By position', 'Position', data.by_position);
   html += _renderResultTable('By effective stack', 'Stack', data.by_depth);
+  if (tournaments) {
+    html += _renderPhaseTable(tournaments.phases);
+    html += _renderTournamentTable(tournaments.tournaments);
+  }
 
   panel.innerHTML = html;
   _bindResultCurve(panel);

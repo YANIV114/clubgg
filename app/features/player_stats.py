@@ -244,6 +244,12 @@ class HandRecord:
     has_ante: bool = field(default=False)
     # Net chips won in the hand / big blind.  None when the result is unknown.
     net_bb: Decimal | None = field(default=None)
+    # Tournament context from the hand header (None = cash / unknown).
+    tournament_id: str | None = field(default=None)
+    tournament_name: str | None = field(default=None)
+    blind_level: int | None = field(default=None)
+    # Hero finished the hand with zero chips.
+    busted: bool = field(default=False)
 
 
 # ---------------------------------------------------------------------------

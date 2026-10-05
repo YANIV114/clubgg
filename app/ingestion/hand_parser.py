@@ -66,12 +66,15 @@ _HEADER_RE = re.compile(
 _HEADER_GG_RE = re.compile(
     r"Poker Hand #(?P<hand_id>\S+):\s+(?P<game_desc>.+?)\s+No Limit"
     r"(?:"
-    r"\s+-\s+Level\d+\((?P<sb>[\d,]+)/(?P<bb>[\d,]+)(?:/[\d,]+)?\)"  # tournament: " - Level12(750/1,500)"
+    r"\s+-\s+Level(?P<level>\d+)\((?P<sb>[\d,]+)/(?P<bb>[\d,]+)(?:/[\d,]+)?\)"  # tournament: " - Level12(750/1,500)"
     r"|"
     r"\s+\(\$(?P<sb2>[\d,]+(?:\.\d+)?)/\$(?P<bb2>[\d,]+(?:\.\d+)?)\)"  # cash: " ($1/$2)"
     r")\s+-\s+"
     r"(?P<ts>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})"
 )
+# Tournament game description: "Tournament #3317780, 200K GTD ♠ FROZEN THRONE HR ♠ RE NLH"
+_TOURNAMENT_RE = re.compile(r"Tournament #(?P<tid>\d+),\s*(?P<name>.+)")
+_GAME_SUFFIX_RE = re.compile(r"\s+(?:NLH|PLO\d?|Hold'em|Short Deck)$", re.IGNORECASE)
 _CLUB_RE = re.compile(
     r"Club:\s+(?P<club_name>.+?)\s+\(ID:\s*(?P<club_id>\d+)\)"
     r"(?:\s+Agent:\s+(?P<agent_name>.+?)\s+\(ID:\s*(?P<agent_id>\d+)\))?"
@@ -177,6 +180,9 @@ class _ParsedHand:
     stakes_sb: Decimal = Decimal("0")
     stakes_bb: Decimal = Decimal("0")
     stakes_ante: Decimal | None = None
+    tournament_external_id: str | None = None
+    tournament_name: str | None = None
+    blind_level_index: int | None = None
     table_name: str | None = None
     button_seat: int | None = None
     hand_started_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
@@ -226,6 +232,9 @@ class HandHistoryParser:
             "stakes_sb": str(h.stakes_sb),
             "stakes_bb": str(h.stakes_bb),
             "stakes_ante": str(h.stakes_ante) if h.stakes_ante else None,
+            "tournament_external_id": h.tournament_external_id,
+            "tournament_name": h.tournament_name,
+            "blind_level_index": h.blind_level_index,
             "table_name": h.table_name,
             "button_seat": h.button_seat,
             "hand_started_at": h.hand_started_at.isoformat(),
@@ -271,6 +280,12 @@ class HandHistoryParser:
                 tzinfo=UTC
             )
             desc = m.group("game_desc").lower()
+            if m.group("level"):
+                h.blind_level_index = int(m.group("level"))
+            tm = _TOURNAMENT_RE.match(m.group("game_desc"))
+            if tm:
+                h.tournament_external_id = tm.group("tid")
+                h.tournament_name = _GAME_SUFFIX_RE.sub("", tm.group("name")).strip() or None
             # No club line in GGPoker exports — use sentinel 0 (auto-created by upload endpoint)
             h.club_id = 0
             h.club_name = "ClubGG"

@@ -502,6 +502,30 @@ class TestGGTournamentFormat:
         assert len(antes) == 4
 
 
+class TestTournamentContext:
+    def test_tournament_id_name_and_level(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_TOURNAMENT_HAND)
+        assert result["tournament_external_id"] == "1000001"
+        assert result["tournament_name"] == "Test GTD"
+        assert result["blind_level_index"] == 14
+
+    def test_name_keeps_symbols_and_drops_game(self, parser: HandHistoryParser) -> None:
+        block = _GG_TOURNAMENT_HAND.replace(
+            "Tournament #1000001, Test GTD NLH", "Tournament #3317780, 200K GTD \u2660 FROZEN THRONE HR \u2660 RE NLH"
+        )
+        result = parser.parse(block)
+        assert result["tournament_external_id"] == "3317780"
+        assert result["tournament_name"] == "200K GTD \u2660 FROZEN THRONE HR \u2660 RE"
+
+    def test_cash_hand_has_no_tournament(
+        self, parser: HandHistoryParser, hand_blocks: list[str]
+    ) -> None:
+        result = parser.parse(hand_blocks[0])
+        assert result["tournament_external_id"] is None
+        assert result["tournament_name"] is None
+        assert result["blind_level_index"] is None
+
+
 class TestActionLines:
     """An action line must never swallow the start of the next line."""
 

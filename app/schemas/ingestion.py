@@ -89,6 +89,8 @@ class IngestHandPayload(BaseModel):
     button_seat: int | None = None
     blind_level_index: int | None = None
     players_remaining: int | None = None
+    tournament_external_id: str | None = None
+    tournament_name: str | None = None
     players: list[IngestHandPlayerPayload]
     actions: list[IngestHandActionPayload]
     winners: list[IngestHandWinnerPayload]

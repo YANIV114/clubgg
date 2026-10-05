@@ -11,12 +11,13 @@ from app.features.leaks import analyze_leaks
 from app.features.player_stats import compute_player_stats
 from app.features.results import compute_results
 from app.features.tournament_plan import build_tournament_plan
+from app.features.tournaments import compute_tournaments
 from app.schemas.common import PaginatedResponse
 from app.schemas.drills import DrillRecommendationOut, DrillSpotOut, VsRaiseDrillsOut
 from app.schemas.leak_report import LeakReportOut
 from app.schemas.leaks import LeakExampleOut, LeakOut, PlayerLeaksOut
 from app.schemas.player import ClubOut, PlayerDetailOut, PlayerOut, PlayerSampleOut
-from app.schemas.results import PlayerResultsOut
+from app.schemas.results import PlayerResultsOut, PlayerTournamentsOut
 from app.schemas.stats import PlayerStatsOut
 from app.schemas.tournament_plan import StudyPriorityOut, TournamentPlanOut, TournamentPlanRequest
 from app.services.drill_service import vs_raise_drills
@@ -133,6 +134,29 @@ async def get_player_results(
     # Records come newest-first; the running total needs chronological order.
     results = compute_results(list(reversed(records)))
     return PlayerResultsOut.model_validate({"player_id": player_id, **dataclasses.asdict(results)})
+
+
+@router.get("/{player_id}/tournaments", response_model=PlayerTournamentsOut)
+async def get_player_tournaments(
+    player_id: uuid.UUID,
+    db: DBSession,
+    limit: int = Query(10000, ge=1, le=10000, description="Max hands to load"),
+) -> PlayerTournamentsOut:
+    """
+    Per-tournament summaries (hands, levels, entries, busts, chip result) and
+    a breakdown by blind-level phase.  Bubble/ITM are not detectable from
+    hand histories (no players-remaining or payout data), so phases are
+    blind-level bands.
+    """
+    player = await get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    records, _ = await hand_records_for_player(db, player_id, limit=limit)
+    breakdown = compute_tournaments(player_id, list(reversed(records)))
+    return PlayerTournamentsOut.model_validate(
+        {"player_id": player_id, **dataclasses.asdict(breakdown)}
+    )
 
 
 # ── Leaks endpoint ───────────────────────────────────────────────────────────

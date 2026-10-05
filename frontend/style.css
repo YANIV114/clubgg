@@ -678,6 +678,7 @@ html, body {
 }
 .results-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-dim); color: var(--text-primary); }
 .results-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.results-note { margin-top: var(--sp-3); font-size: var(--text-xs); color: var(--text-muted); line-height: 1.5; }
 
 .res-chart { position: relative; }
 .res-chart svg { width: 100%; height: 220px; display: block; }

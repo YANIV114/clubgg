@@ -35,8 +35,6 @@ _CRITICAL_MAJOR = frozenset({"major", "critical"})
 _PUSH_FOLD_SPOTS = frozenset({"push_fold", "bubble_icm", "final_table_icm"})
 
 # Overfold thresholds
-_STEAL_FOLD_THRESHOLD = Decimal("0.65")  # folding > 65% of first-in steal spots
-_BB_FOLD_THRESHOLD = Decimal("0.72")  # folding > 72% of BB defense spots
 _BUBBLE_FOLD_THRESHOLD = Decimal("0.55")  # folding > 55% of bubble spots with 10–20bb
 _FLAT_CALL_CRITICAL_RATE = 0.10  # flat calls in ≥10% of short-stack spots → critical
 
@@ -158,11 +156,12 @@ def find_leaks(
     """
     classifiable = [r for r in records if r.result.spot_type != "other"]
 
+    # Steal and BB-defence frequencies are not detected here: those spot types
+    # only cover hands that ended preflop, so their samples are mostly folds.
+    # The stat-based engine (app/features/leaks.py) measures them correctly.
     detectors = [
         _detect_flat_calling_short_stack,
         _detect_missing_pushfold_shove,
-        _detect_overfold_steal_position,
-        _detect_passive_bb_defense,
         _detect_loose_call_all_in,
         _detect_bubble_overtightness,
         _detect_final_table_passivity,
@@ -334,133 +333,6 @@ def _detect_missing_pushfold_shove(
         suggested_fix=(
             "Replace min-raises with all-in shoves at ≤10bb. The shove applies maximum "
             "fold equity and prevents opponents from realizing equity cheaply post-flop."
-        ),
-    )
-
-
-def _detect_overfold_steal_position(
-    all_records: list[AnalyzedHandRecord],
-    classifiable: list[AnalyzedHandRecord],
-) -> LeakFinding | None:
-    """
-    Over-folding in steal positions (BTN/CO/SB) when first-in.
-
-    A high fold rate in steal spots indicates the player is leaving unclaimed
-    pots and surrendering their positional advantage.
-    """
-    eligible = [r for r in classifiable if r.result.spot_type == "steal"]
-
-    if len(eligible) < 5:
-        return None
-
-    folds = [r for r in eligible if "folded" in r.result.hero_action.lower()]
-    n = len(eligible)
-    n_folds = len(folds)
-
-    if n_folds == 0:
-        return None
-
-    rate = Decimal(n_folds) / Decimal(n)
-    if rate < _STEAL_FOLD_THRESHOLD:
-        return None
-
-    confidence = _confidence_tier(n)
-    severity = _cap_severity("minor", confidence)
-
-    evidence = [
-        f"Hand {r.hand_external_id}: {r.result.spot_type} — {r.result.hero_action} "
-        f"({r.position or 'unknown'}, {r.stack_bb}bb)"
-        for r in folds[:5]
-    ]
-
-    pos_note = _position_breakdown(eligible, folds)
-    if pos_note:
-        evidence.insert(0, f"Position breakdown (folds/total): {pos_note}")
-
-    return LeakFinding(
-        leak_id="overfold-steal-position",
-        category="preflop",
-        title="Over-Folding in Steal Positions",
-        description=(
-            f"Folded {n_folds}/{n} ({float(rate):.0%}) first-in opportunities from BTN/CO/SB. "
-            "A high fold rate here surrenders unclaimed blinds and reduces positional edge."
-        ),
-        evidence=evidence,
-        confidence=confidence,
-        severity=severity,
-        frequency=round(float(rate), 3),
-        sample_size=n,
-        limitations=(
-            "Fold rate in steal spots is hand-strength dependent. Without hole cards, "
-            "this is directional only. Folding from SB is more often correct due to "
-            "out-of-position disadvantage post-flop."
-        ),
-        suggested_fix=(
-            "From BTN first-in: open-raise with the top 50–60% of hands. From CO: 40–45%. "
-            "From SB vs empty pot: 35–40% is a reasonable starting baseline. "
-            "Suited connectors, small pairs, and suited broadways should nearly always open."
-        ),
-    )
-
-
-def _detect_passive_bb_defense(
-    all_records: list[AnalyzedHandRecord],
-    classifiable: list[AnalyzedHandRecord],
-) -> LeakFinding | None:
-    """
-    Over-folding in BB defense spots.
-
-    A very high fold rate in BB defense spots makes any steal attempt
-    immediately profitable, leaking chips every orbit.
-    """
-    eligible = [r for r in classifiable if r.result.spot_type == "defend_bb"]
-
-    if len(eligible) < 5:
-        return None
-
-    folds = [r for r in eligible if "folded" in r.result.hero_action.lower()]
-    n = len(eligible)
-    n_folds = len(folds)
-
-    if n_folds == 0:
-        return None
-
-    rate = Decimal(n_folds) / Decimal(n)
-    if rate < _BB_FOLD_THRESHOLD:
-        return None
-
-    confidence = _confidence_tier(n)
-    severity = _cap_severity("major", confidence)
-
-    evidence = [
-        f"Hand {r.hand_external_id}: BB defense — {r.result.hero_action} ({r.stack_bb}bb)"
-        for r in folds[:5]
-    ]
-
-    return LeakFinding(
-        leak_id="passive-bb-defense",
-        category="preflop",
-        title="Passive BB Defense (Over-Folding)",
-        description=(
-            f"Folded {n_folds}/{n} ({float(rate):.0%}) BB defense opportunities. "
-            "This makes any steal from BTN/CO/SB immediately profitable — "
-            "opponents can print money by opening wide."
-        ),
-        evidence=evidence,
-        confidence=confidence,
-        severity=severity,
-        frequency=round(float(rate), 3),
-        sample_size=n,
-        limitations=(
-            "Optimal BB defense depends on opener position and sizing. "
-            "Against large 3x–4x opens from EP, 65%+ fold is defensible. "
-            "Pot odds and exact stack depth are not captured here."
-        ),
-        suggested_fix=(
-            "From BB vs BTN open: defend the bottom ~30% of hands at minimum — "
-            "suited connectors, small pairs, any ace. "
-            "Add 3-bets with A5s–A2s (bluffs) and QQ+/AK (value) to prevent opponents "
-            "from exploiting a call-only defending range."
         ),
     )
 

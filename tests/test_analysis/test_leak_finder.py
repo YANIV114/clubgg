@@ -51,3 +51,22 @@ class TestFlatCallingShortStack:
 
     def test_single_flat_call_not_reported(self):
         assert _flat_call_leak(1, 50) is None
+
+
+class TestPreflopFrequencyLeaksNotFromSpotTypes:
+    """
+    'steal' and 'defend_bb' spot types only cover hands that ended preflop:
+    a steal or BB defence that reaches the flop is classified postflop.
+    Their samples are therefore mostly folds, so per-hand fold rates are
+    biased; these frequencies come from the stat-based engine instead.
+    """
+
+    def test_no_steal_overfold_leak_from_biased_sample(self):
+        records = [_rec("steal", "folded", "none")] * 40
+        ids = {lk.leak_id for lk in find_leaks(records, uuid.uuid4()).leaks}
+        assert "overfold-steal-position" not in ids
+
+    def test_no_bb_overfold_leak_from_biased_sample(self):
+        records = [_rec("defend_bb", "folded", "none")] * 40
+        ids = {lk.leak_id for lk in find_leaks(records, uuid.uuid4()).leaks}
+        assert "passive-bb-defense" not in ids

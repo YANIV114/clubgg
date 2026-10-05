@@ -45,6 +45,7 @@ Villain: posts big blind $1.00
 Dealt to {_HAND_HERO} [As Kd]
 {_HAND_HERO}: raises $3.00 to $3.50
 Villain: folds
+Uncalled bet ($2.50) returned to {_HAND_HERO}
 *** SUMMARY ***
 Total pot $2.00 | Rake $0.10
 Seat 1: {_HAND_HERO} collected $1.90 from main pot
@@ -130,6 +131,18 @@ class TestMeImport:
         )
         assert resp.status_code == 400
         assert "txt" in resp.json()["detail"].lower()
+
+    async def test_me_hands_reports_result_in_bb(self, async_client: AsyncClient) -> None:
+        token = await _register(async_client, "import5@example.com")
+        headers = {"Authorization": f"Bearer {token}"}
+        resp = await async_client.post("/api/v1/me/import", files=[_hand_file()], headers=headers)
+        assert resp.status_code == 200
+
+        hands = (await async_client.get("/api/v1/me/hands", headers=headers)).json()["hands"]
+        hand = next(h for h in hands if h["hand_external_id"] == "77700001")
+        # Hero raises to $3.50, $2.50 comes back uncalled: $1.00 in, $1.90 collected.
+        assert hand["net_won"] is not None
+        assert hand["net_won_bb"] == "0.9"
 
     async def test_me_analysis_reflects_imported_hands(
         self, async_client: AsyncClient, db_session: AsyncSession

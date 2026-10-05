@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
@@ -306,6 +307,9 @@ async def get_my_hands(
             )
             for hp in sorted(hand.hand_players, key=lambda hp: hp.seat_number or 0)
         ]
+        net_won_bb = None
+        if hero_hp and hero_hp.net_won is not None and hand.stakes_bb:
+            net_won_bb = str((hero_hp.net_won / hand.stakes_bb).quantize(Decimal("0.1")))
         hand_outs.append(
             MeHandOut(
                 hand_external_id=hand.external_id,
@@ -315,6 +319,7 @@ async def get_my_hands(
                     str(hero_hp.stack_bb) if hero_hp and hero_hp.stack_bb is not None else None
                 ),
                 net_won=(str(hero_hp.net_won) if hero_hp and hero_hp.net_won is not None else None),
+                net_won_bb=net_won_bb,
                 board_cards=hand.board_cards,
                 hand_started_at=hand.hand_started_at,
                 player_count=hand.player_count,

@@ -51,7 +51,8 @@ class MeHandOut(BaseModel):
     table_name: str | None
     position: str | None
     stack_bb: str | None
-    net_won: str | None
+    net_won: str | None  # chips
+    net_won_bb: str | None = None  # net_won / big blind (derived)
     board_cards: str | None
     hand_started_at: datetime
     player_count: int

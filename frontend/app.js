@@ -3514,22 +3514,29 @@ async function _imTryRealHand(resultEl, leakType, seed) {
     const { hands } = await res.json();
     if (!hands || !hands.length) return;
 
+    // Folded preflop without investing: lost at most the ante (+ SB's half blind),
+    // i.e. under 1bb.  Hands with an unknown result are skipped.
+    const foldedCheap = h => {
+      if (h.net_won_bb == null) return false;
+      const bb = parseFloat(h.net_won_bb);
+      return bb <= 0 && bb > -1;
+    };
     let match;
     if (leakType === 'steal') {
-      // Find a BTN or CO hand where net_won is 0 (folded without investing) at 12–25bb
+      // Find a BTN or CO hand folded without investing at 12–25bb
       match = hands.find(h =>
         (h.position === 'BTN' || h.position === 'CO') &&
         h.stack_bb != null &&
         parseFloat(h.stack_bb) >= 12 && parseFloat(h.stack_bb) <= 25 &&
-        parseFloat(h.net_won || '0') === 0
+        foldedCheap(h)
       );
     } else {
-      // Find a BTN/CO/SB hand at 8–15bb where net_won is 0 (folded preflop)
+      // Find a BTN/CO/SB hand at 8–15bb folded preflop
       match = hands.find(h =>
         (h.position === 'BTN' || h.position === 'CO' || h.position === 'SB') &&
         h.stack_bb != null &&
         parseFloat(h.stack_bb) >= 8 && parseFloat(h.stack_bb) <= 15 &&
-        parseFloat(h.net_won || '0') === 0
+        foldedCheap(h)
       );
     }
     if (!match) return;
@@ -7164,7 +7171,8 @@ async function _anInitHub() {
             ? (liveHands.length === 0
                 ? `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No hands found. Import hand history files to start.</td></tr>`
                 : liveHands.slice(0, 10).map(h => {
-                    const netWon = h.net_won != null ? parseFloat(h.net_won) : null;
+                    // Result in big blinds (net_won itself is in chips).
+                    const netWon = h.net_won_bb != null ? parseFloat(h.net_won_bb) : null;
                     const stackBb = h.stack_bb ? `${parseFloat(h.stack_bb).toFixed(0)}bb` : '—';
                     const pos = h.position || '—';
                     const board = h.board_cards || '';

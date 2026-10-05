@@ -145,6 +145,13 @@
       >Trainer</button>
       <button
         class="tab-btn"
+        data-tab="review"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-review"
+      >Review</button>
+      <button
+        class="tab-btn"
         data-tab="progress"
         role="tab"
         aria-selected="false"
@@ -213,6 +220,16 @@
         aria-labelledby="tab-trainer"
       >
         <!-- Populated by renderTrainer() -->
+      </section>
+
+      <!-- Review Panel -->
+      <section
+        id="panel-review"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-review"
+      >
+        <!-- Populated by renderTournamentReview() -->
       </section>
 
       <!-- Progress Panel -->

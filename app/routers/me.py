@@ -18,6 +18,7 @@ from app.ingestion.hand_parser import _HAND_BLOCK_RE, HandHistoryFileIngestor, H
 from app.models.hand import Hand, HandPlayer
 from app.models.player import Club, Player
 from app.models.user import User
+from app.schemas.leak_report import LeakFindingOut, LeakReportOut
 from app.schemas.leaks import LeakExampleOut, LeakOut, PlayerLeaksOut
 from app.schemas.me import (
     HandPlayerSummaryOut,
@@ -32,6 +33,7 @@ from app.schemas.me import (
 from app.schemas.stats import PlayerStatsOut
 from app.services.billing_service import require_feature
 from app.services.hand_service import hand_records_for_player
+from app.services.leak_report_service import build_leak_report
 from app.services.user_player_service import (
     get_linked_players,
     get_primary_player,
@@ -248,6 +250,48 @@ async def get_my_leaks(
         hand_count=stats.hand_count,
         leaks=leak_outs,
         analysis_note=note,
+    )
+
+
+@router.get("/me/leak-report", response_model=LeakReportOut)
+async def get_my_leak_report(
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_tester),
+    _gate: None = Depends(_require_leak_tracker),
+    limit: int = Query(500, ge=1, le=2000),
+    from_date: datetime | None = Query(None),
+    to_date: datetime | None = Query(None),
+) -> LeakReportOut:
+    player = await _get_primary_or_404(session, current_user.id)
+    report = await build_leak_report(
+        session,
+        player.id,
+        limit=limit,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return LeakReportOut(
+        player_id=report.player_id,
+        leaks=[
+            LeakFindingOut(
+                leak_id=lk.leak_id,
+                category=lk.category,
+                title=lk.title,
+                description=lk.description,
+                evidence=lk.evidence,
+                confidence=lk.confidence,
+                severity=lk.severity,
+                frequency=lk.frequency,
+                sample_size=lk.sample_size,
+                limitations=lk.limitations,
+                suggested_fix=lk.suggested_fix,
+            )
+            for lk in report.leaks
+        ],
+        summary=report.summary,
+        total_hands_analyzed=report.total_hands_analyzed,
+        sample_size=report.sample_size,
+        generated_at=report.generated_at,
     )
 
 

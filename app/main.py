@@ -22,6 +22,7 @@ from app.routers import (
     players,
     preferences,
     sessions,
+    tournament,
     transactions,
 )
 
@@ -109,6 +110,11 @@ app.include_router(
     prefix=f"{settings.API_PREFIX}",
     tags=["onboarding"],
 )
+app.include_router(
+    tournament.router,
+    prefix=f"{settings.API_PREFIX}",
+    tags=["tournament"],
+)
 
 # Mount frontend static files
 _frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
@@ -140,6 +146,7 @@ if os.path.exists(_frontend_dir):
         "/courses",
         "/courses/{slug}",
         "/admin",
+        "/tournament-review",
     ):
         app.add_api_route(_sp_path, _serve_spa, include_in_schema=False)
 

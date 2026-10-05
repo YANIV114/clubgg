@@ -487,6 +487,7 @@ const els = {
   leaksPanel:     () => document.getElementById('panel-leaks'),
   planPanel:      () => document.getElementById('panel-plan'),
   trainerPanel:   () => document.getElementById('panel-trainer'),
+  reviewPanel:    () => document.getElementById('panel-review'),
 };
 
 /* ============================================================
@@ -579,6 +580,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-panel').forEach(panel => {
     panel.classList.toggle('active', panel.id === `panel-${tab}`);
   });
+  if (tab === 'review') renderTournamentReview();
 }
 
 /* ============================================================
@@ -3984,15 +3986,29 @@ function rsRender() {
     ? '#' + hand.external_id.replace(/^(Poker Hand #|Hand #|ClubGG Hand #)/i, '').slice(-12)
     : '';
 
-  const dotsHtml = allExamples.map((_, i) =>
-    `<span class="rs-dot${i === exIdx ? ' rs-dot--active' : ''}" data-ex="${i}"></span>`
-  ).join('');
-  const navHtml = allExamples.length > 1 ? `
+  let navHtml;
+  if (_rs.reviewMode) {
+    const { rvHandIdx, rvFilteredHands } = _rs;
+    const total = rvFilteredHands ? rvFilteredHands.length : 1;
+    const hasPrev = rvHandIdx > 0;
+    const hasNext = rvHandIdx < total - 1;
+    navHtml = `
+    <div class="rs-nav">
+      <button class="rs-nav-btn" id="rs-prev-hand" ${hasPrev ? '' : 'disabled'}>‹</button>
+      <span class="rs-nav-counter">${rvHandIdx + 1} / ${total}</span>
+      <button class="rs-nav-btn" id="rs-next-hand" ${hasNext ? '' : 'disabled'}>›</button>
+    </div>`;
+  } else {
+    const dotsHtml = allExamples.map((_, i) =>
+      `<span class="rs-dot${i === exIdx ? ' rs-dot--active' : ''}" data-ex="${i}"></span>`
+    ).join('');
+    navHtml = allExamples.length > 1 ? `
     <div class="rs-nav">
       <button class="rs-nav-btn" id="rs-prev" ${exIdx > 0 ? '' : 'disabled'}>‹</button>
       <div class="rs-nav-dots">${dotsHtml}</div>
       <button class="rs-nav-btn" id="rs-next" ${exIdx < allExamples.length - 1 ? '' : 'disabled'}>›</button>
     </div>` : '<div class="rs-nav"></div>';
+  }
 
   // Per-seat unique color identity — each player visually distinct
   const SEAT_BG = [
@@ -4140,6 +4156,7 @@ function rsUpdateLog() {
 
 function rsShowDecision() {
   if (!_rs) return;
+  if (_rs.reviewMode) { rsShowReviewReveal(); return; }
   _rs.phase = 'decision';
   const { panel } = _rs;
   panel.querySelector('#rs-table')?.classList.add('rs-table--decision');
@@ -4463,8 +4480,21 @@ function rsActionBubble(panel, seatEl, text, cls) {
 
 function rsBindControls(panel) {
   panel.querySelector('#rs-back')?.addEventListener('click', () => {
+    if (_rs?.reviewMode) { const { rvOnBack } = _rs; _rsStop(); if (rvOnBack) rvOnBack(); return; }
     _rsStop();
     if (_rsOnBack) { const cb = _rsOnBack; _rsOnBack = null; cb(); } else { renderLeaks(leaksData); }
+  });
+
+  // Review mode hand navigation
+  panel.querySelector('#rs-prev-hand')?.addEventListener('click', () => {
+    if (!_rs?.reviewMode) return;
+    const { rvHandIdx, rvFilteredHands, rvPanel } = _rs;
+    if (rvHandIdx > 0) { _rsStop(); _trOpenHand(rvPanel, rvFilteredHands, rvHandIdx - 1); }
+  });
+  panel.querySelector('#rs-next-hand')?.addEventListener('click', () => {
+    if (!_rs?.reviewMode) return;
+    const { rvHandIdx, rvFilteredHands, rvPanel } = _rs;
+    if (rvHandIdx < rvFilteredHands.length - 1) { _rsStop(); _trOpenHand(rvPanel, rvFilteredHands, rvHandIdx + 1); }
   });
 
   // Dot nav
@@ -12675,4 +12705,444 @@ function trShowSummary() {
   board.querySelectorAll('[data-tr-nav]').forEach(btn => {
     btn.addEventListener('click', () => spNavigate(btn.dataset.trNav));
   });
+}
+
+/* ============================================================
+   TOURNAMENT REVIEW MODE
+   ============================================================ */
+
+let _trReviewState = null; // { tournamentId, hands, filter }
+
+// ── Entry point called by switchTab('review') ──────────────────────────────
+
+function renderTournamentReview() {
+  const panel = els.reviewPanel();
+  if (!panel) return;
+  if (!authIsLoggedIn()) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">Sign in to review your hands</div>
+      <div class="empty-state-sub">Tournament review requires a linked account.</div>
+    </div>`;
+    return;
+  }
+  if (_trReviewState?.tournamentId) {
+    _trRenderHandView(panel, _trReviewState.hands, _trReviewState.filter || 'all', 0);
+  } else {
+    _trRenderList(panel);
+  }
+}
+
+// ── Tournament list ────────────────────────────────────────────────────────
+
+async function _trRenderList(panel) {
+  panel.innerHTML = `<div class="loading-state"><div class="spinner"></div>Loading tournaments…</div>`;
+  let tournaments;
+  try {
+    tournaments = await _trFetch('/me/tournaments');
+  } catch (e) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">Could not load tournaments</div>
+      <div class="empty-state-sub">${escHtml(String(e.message || e))}</div>
+    </div>`;
+    return;
+  }
+  if (!tournaments.length) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">No tournament sessions yet</div>
+      <div class="empty-state-sub">Import hand history files to start reviewing sessions.</div>
+      <button class="sp-btn-primary" style="margin-top:16px" onclick="switchTab('import')">Import Hands</button>
+    </div>`;
+    return;
+  }
+  panel.innerHTML = `
+    <div class="rv-list-wrap">
+      <h2 class="rv-list-title">Tournament Sessions</h2>
+      <div class="rv-list" id="rv-list"></div>
+    </div>`;
+  const list = panel.querySelector('#rv-list');
+  list.innerHTML = tournaments.map(t => {
+    const date = t.last_hand_at ? new Date(t.last_hand_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    const net = t.hero_net_bb != null
+      ? `<span class="rv-net ${t.hero_net_bb >= 0 ? 'rv-net--pos' : 'rv-net--neg'}">${t.hero_net_bb >= 0 ? '+' : ''}${t.hero_net_bb}bb</span>`
+      : '';
+    return `<div class="rv-row" data-tid="${escHtml(t.id)}">
+      <div class="rv-row-left">
+        <div class="rv-row-table">${escHtml(t.table_name)}</div>
+        <div class="rv-row-meta">${escHtml(date)} &middot; ${t.hand_count} hand${t.hand_count !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="rv-row-right">
+        ${net}
+        <button class="sp-btn-primary rv-review-btn" data-tid="${escHtml(t.id)}">Review</button>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.rv-review-btn').forEach(btn => {
+    btn.addEventListener('click', () => _trLoadTournament(panel, btn.dataset.tid));
+  });
+}
+
+async function _trLoadTournament(panel, tid) {
+  panel.innerHTML = `<div class="loading-state"><div class="spinner"></div>Loading hands…</div>`;
+  let hands;
+  try {
+    hands = await _trFetch(`/me/tournaments/${encodeURIComponent(tid)}/review`);
+  } catch (e) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">Could not load tournament hands</div>
+      <div class="empty-state-sub">${escHtml(String(e.message || e))}</div>
+      <button class="sp-btn-secondary" style="margin-top:16px" id="rv-back-list">Back to list</button>
+    </div>`;
+    panel.querySelector('#rv-back-list')?.addEventListener('click', () => { _trReviewState = null; _trRenderList(panel); });
+    return;
+  }
+  _trReviewState = { tournamentId: tid, hands, filter: 'all' };
+  _trRenderHandView(panel, hands, 'all', 0);
+}
+
+// ── Hand view ──────────────────────────────────────────────────────────────
+
+function _trRenderHandView(panel, hands, filter, startIdx) {
+  const filtered = _trFilterHands(hands, filter);
+  if (!filtered.length) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">No hands match this filter</div>
+      <button class="sp-btn-secondary" style="margin-top:16px" id="rv-filter-all">Show All</button>
+    </div>`;
+    panel.querySelector('#rv-filter-all')?.addEventListener('click', () => {
+      _trReviewState.filter = 'all';
+      _trRenderHandView(panel, hands, 'all', 0);
+    });
+    return;
+  }
+  _trOpenHand(panel, filtered, Math.min(startIdx, filtered.length - 1));
+}
+
+function _trFilterHands(hands, filter) {
+  if (filter === 'all') return hands;
+  if (filter === 'speculative') return hands.filter(h => h.analysis?.confidence === 'speculative');
+  if (filter === 'mistakes')    return hands.filter(h => ['minor', 'major', 'critical'].includes(h.analysis?.mistake_severity));
+  if (filter === 'major')       return hands.filter(h => ['major', 'critical'].includes(h.analysis?.mistake_severity));
+  if (filter === 'good')        return hands.filter(h => h.analysis?.mistake_severity === 'good');
+  // Legacy fallback for old coaching.severity values
+  return hands.filter(h => h.analysis?.mistake_severity === filter || h.coaching?.severity === filter);
+}
+
+function _trOpenHand(panel, filteredHands, idx) {
+  const item = filteredHands[idx];
+  if (!item) return;
+  const hand    = item.hand;
+  const heroId  = item.hero_player_id;
+  const heroHp  = hand.hand_players.find(hp => hp.player_id === heroId);
+  if (!heroHp) return;
+  const coaching  = item.coaching;
+  const timeline  = rsBuildFullTimeline(hand);
+  const seatOrder = rsBuildSeatOrder(hand.hand_players, heroId);
+  const currentFilter = _trReviewState?.filter || 'all';
+  const allHands      = _trReviewState?.hands || filteredHands;
+
+  const analysis = item.analysis || null;
+
+  _rsStop();
+  _rs = {
+    panel,
+    hand, heroId, heroHp,
+    // Minimal leak-compatible fields so rsRender / rsBindControls work unchanged
+    leak: { leak_id: 'review', title: _trAnalysisTitle(analysis, coaching), severity: _trMistakeSev(analysis) },
+    example: {}, allExamples: [], exIdx: 0,
+    opts: [], correct: null,
+    timeline, seatOrder,
+    step: 0, decisionStep: timeline.length,
+    phase: 'replay', chosen: null, logOpen: false, playing: true, playTimer: null,
+    // Review-mode extras
+    reviewMode: true,
+    rvHandIdx: idx, rvFilteredHands: filteredHands, rvPanel: panel,
+    rvCoaching: coaching,
+    rvAnalysis: analysis,
+    rvOnBack: () => { _trReviewState = null; _trRenderList(panel); },
+  };
+  panel.innerHTML = _trRenderFilterBar(allHands, currentFilter, filteredHands, idx) + rsRender();
+  _trBindFilterBar(panel, allHands, filteredHands, currentFilter);
+  rsBindControls(panel);
+  if (timeline.length > 0) rsScheduleNext();
+  else rsShowReviewReveal();
+}
+
+function _trAnalysisTitle(analysis, coaching) {
+  if (analysis) {
+    const sev = { good: 'Good Play', none: 'Review', minor: 'Mistake', major: 'Major Mistake', critical: 'Critical Mistake' };
+    return `${sev[analysis.mistake_severity] || 'Review'} — ${analysis.spot_type}`;
+  }
+  if (!coaching) return 'Hand Review';
+  const sev = { good: 'Good Play', neutral: 'Review', small_mistake: 'Mistake', big_mistake: 'Major Mistake' };
+  return `${sev[coaching.severity] || 'Review'} — ${coaching.spot_type}`;
+}
+
+function _trMistakeSev(analysis) {
+  if (!analysis) return 'neutral';
+  const map = { good: 'low', none: 'low', minor: 'medium', major: 'high', critical: 'critical' };
+  return map[analysis.mistake_severity] || 'low';
+}
+
+// ── Filter bar ─────────────────────────────────────────────────────────────
+
+function _trRenderFilterBar(allHands, activeFilter, filteredHands, handIdx) {
+  let nMajor = 0, nMistakes = 0, nGood = 0, nSpec = 0;
+  allHands.forEach(h => {
+    const sev = h.analysis?.mistake_severity;
+    const conf = h.analysis?.confidence;
+    if (sev === 'major' || sev === 'critical') nMajor++;
+    if (sev === 'minor') nMistakes++;
+    if (sev === 'good') nGood++;
+    if (conf === 'speculative') nSpec++;
+  });
+  const pills = [
+    { k: 'all',         label: `All (${allHands.length})` },
+    { k: 'major',       label: `Major (${nMajor})` },
+    { k: 'mistakes',    label: `Mistakes (${nMistakes})` },
+    { k: 'good',        label: `Good (${nGood})` },
+    { k: 'speculative', label: `Speculative (${nSpec})` },
+  ].map(p =>
+    `<button class="rv-pill${activeFilter === p.k ? ' rv-pill--active' : ''}" data-sev="${p.k}">${escHtml(p.label)}</button>`
+  ).join('');
+  return `<div class="rv-filter-bar" id="rv-filter-bar">${pills}</div>`;
+}
+
+function _trBindFilterBar(panel, allHands, filteredHands, currentFilter) {
+  panel.querySelectorAll('.rv-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sev = btn.dataset.sev;
+      if (_trReviewState) _trReviewState.filter = sev;
+      _trRenderHandView(panel, allHands, sev, 0);
+    });
+  });
+}
+
+// ── Review reveal (coaching panel) ────────────────────────────────────────
+
+function rsShowReviewReveal() {
+  if (!_rs) return;
+  _rs.phase = 'reveal';
+  const { panel, rvAnalysis, rvCoaching, rvHandIdx, rvFilteredHands, heroHp } = _rs;
+  const tableEl = panel.querySelector('#rs-table');
+  if (tableEl) tableEl.classList.remove('rs-table--decision');
+  const dockEl = panel.querySelector('#rs-decision-dock');
+  if (dockEl) dockEl.hidden = true;
+  const ctrlWrap = panel.querySelector('.rs-tbl-controls');
+  if (ctrlWrap) ctrlWrap.style.display = '';
+
+  const revealEl = panel.querySelector('#rs-reveal');
+  if (!revealEl) return;
+  revealEl.hidden = false;
+
+  const pos     = heroHp?.position || '?';
+  const stackBb = heroHp?.stack_bb ? parseFloat(heroHp.stack_bb).toFixed(0) : '?';
+  const total   = rvFilteredHands ? rvFilteredHands.length : 1;
+  const hasPrev = rvHandIdx > 0;
+  const hasNext = rvHandIdx < total - 1;
+
+  // Prefer the new analysis object; fall back to legacy coaching
+  const src = rvAnalysis || rvCoaching;
+  if (!src) {
+    revealEl.innerHTML = `<div class="rs-rev-section"><div class="rs-rev-label">Hand Review</div>
+      <div class="rs-tip"><div class="rs-tip-val">No analysis data for this hand.</div></div>
+    </div>` + _rvNavBtns(hasPrev, hasNext);
+    _rvBindNavBtns(revealEl);
+    return;
+  }
+
+  // Severity mapping — handle both old (coaching) and new (analysis) field names
+  const mistakeSev = rvAnalysis?.mistake_severity || null;
+  const legacySev  = rvCoaching?.severity || null;
+  const SEV_CLS = {
+    good: 'rv-sev--good', none: 'rv-sev--neutral',
+    minor: 'rv-sev--minor', major: 'rv-sev--major', critical: 'rv-sev--major',
+    small_mistake: 'rv-sev--minor', big_mistake: 'rv-sev--major', neutral: 'rv-sev--neutral',
+  };
+  const SEV_LBL = {
+    good: 'Good Play', none: 'Neutral',
+    minor: 'Mistake', major: 'Major Mistake', critical: 'Critical Mistake',
+    small_mistake: 'Mistake', big_mistake: 'Major Mistake', neutral: 'Neutral',
+  };
+  const activeSev = mistakeSev || legacySev || 'none';
+  const sevCls = SEV_CLS[activeSev] || 'rv-sev--neutral';
+  const sevLbl = SEV_LBL[activeSev] || 'Neutral';
+
+  // Confidence label (new engine only)
+  const isSpeculative = rvAnalysis?.confidence === 'speculative';
+  const confLbl = rvAnalysis
+    ? rvAnalysis.confidence.toUpperCase()
+    : '';
+  const confBadgeCls = isSpeculative ? 'rv-conf--spec' : 'rv-conf--inf';
+  const confBadge = confLbl
+    ? `<span class="rv-conf-badge ${confBadgeCls}">${escHtml(confLbl)}</span>`
+    : '';
+
+  const speculativeNote = isSpeculative
+    ? `<div class="rv-spec-note">Estimate only — exact solver/ICM data unavailable.</div>`
+    : '';
+
+  // Key factors (new engine only)
+  const keyFactors = rvAnalysis?.key_factors || [];
+  const keyFactorsHtml = keyFactors.length
+    ? `<div class="rs-tip">
+        <div class="rs-tip-lbl">Key factors</div>
+        <div class="rs-tip-val rv-factors">${keyFactors.map(f => `<span class="rv-factor">${escHtml(f)}</span>`).join('')}</div>
+      </div>`
+    : '';
+
+  // Range context (new engine only)
+  const rangeCtx = rvAnalysis?.range_context || '';
+  const rangePos = rvAnalysis?.hero_range_position || 'unknown';
+  const RANGE_POS_CLS = { top: 'rv-rpos--top', mid: 'rv-rpos--mid', bottom: 'rv-rpos--bottom', outside: 'rv-rpos--outside' };
+  const rangeHtml = rangeCtx
+    ? `<div class="rs-tip">
+        <div class="rs-tip-lbl">Range context</div>
+        <div class="rs-tip-val">${escHtml(rangeCtx)}${rangePos !== 'unknown'
+          ? ` &mdash; <span class="rv-rpos-badge ${RANGE_POS_CLS[rangePos] || ''}">${escHtml(rangePos)} of range</span>`
+          : ''}</div>
+      </div>
+      <div class="rv-range-note">Range-based estimate &mdash; not exact solver output</div>`
+    : '';
+
+  // Backing label (new engine only)
+  const backingHtml = rvAnalysis?.backing
+    ? `<div class="rv-backing">Basis: <span class="rv-backing-val">${escHtml(rvAnalysis.backing)}</span></div>`
+    : '';
+
+  // Practical exploit adjustment (opponent profile layer)
+  const exploit = rvAnalysis?.exploit_adjustment || '';
+  const villainProfileRaw = rvAnalysis?.villain_profile || '';
+  const villainConf = rvAnalysis?.villain_profile_confidence || '';
+  let exploitHtml = '';
+
+  if (villainProfileRaw === 'unknown') {
+    exploitHtml = `<div class="rv-exploit rv-exploit--unknown">
+      <div class="rv-exploit-header">&#x1F9E0; Practical Adjustment</div>
+      <div class="rv-exploit-no-data">Not enough hands on villain for a reliable exploit adjustment.</div>
+    </div>`;
+  } else if (villainProfileRaw === 'balanced') {
+    const confBadgeHtml = villainConf
+      ? `<span class="rv-exploit-conf rv-exploit-conf--${escHtml(villainConf)}">${escHtml(villainConf)}</span>`
+      : '';
+    exploitHtml = `<div class="rv-exploit">
+      <div class="rv-exploit-header">&#x1F9E0; Practical Adjustment</div>
+      <div class="rv-exploit-villain">Villain: Balanced ${confBadgeHtml}</div>
+      <div class="rv-exploit-no-data">Player appears balanced — stay close to Nash baseline.</div>
+    </div>`;
+  } else if (exploit && villainProfileRaw) {
+    const villainLabel = villainProfileRaw.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const confBadgeHtml = villainConf
+      ? `<span class="rv-exploit-conf rv-exploit-conf--${escHtml(villainConf)}">${escHtml(villainConf)}</span>`
+      : '';
+    const lines = exploit.split('\n');
+    const hasStats = lines[0].startsWith('VPIP');
+    const statsHtml = hasStats ? `<div class="rv-exploit-stats">${escHtml(lines[0])}</div>` : '';
+    const bulletLines = lines.slice(hasStats ? 1 : 0).filter(b => b.trim());
+    const bulletsHtml = bulletLines.map(b => `<div class="rv-exploit-bullet">${escHtml(b)}</div>`).join('');
+    exploitHtml = `<div class="rv-exploit">
+      <div class="rv-exploit-header">&#x1F9E0; Practical Adjustment</div>
+      <div class="rv-exploit-villain">Villain: ${escHtml(villainLabel)} ${confBadgeHtml}</div>
+      ${statsHtml}
+      <div class="rv-exploit-bullets">${bulletsHtml}</div>
+    </div>`;
+  }
+
+  revealEl.innerHTML = `
+    <div class="rs-rev-section">
+      <div class="rs-rev-label">Analysis ${confBadge} <span class="rv-sev-badge ${sevCls}">${escHtml(sevLbl)}</span></div>
+      ${speculativeNote}
+      <div class="rs-tip">
+        <div class="rs-tip-lbl">Spot</div>
+        <div class="rs-tip-val">${escHtml(src.spot_type)} &middot; ${escHtml(pos)} &middot; ${escHtml(stackBb)}bb</div>
+      </div>
+      <div class="rs-tip">
+        <div class="rs-tip-lbl">Your action</div>
+        <div class="rs-tip-val">${escHtml(src.hero_action)}</div>
+      </div>
+      <div class="rs-tip">
+        <div class="rs-tip-lbl">Recommended</div>
+        <div class="rs-tip-val rv-recommended">${escHtml(src.recommended_action)}</div>
+      </div>
+      <div class="rs-tip">
+        <div class="rs-tip-lbl">Explanation</div>
+        <div class="rs-tip-val">${escHtml(src.explanation)}</div>
+      </div>
+      ${keyFactorsHtml}
+      ${rangeHtml}
+      ${backingHtml}
+      ${exploitHtml}
+    </div>
+    <details class="rv-limitations">
+      <summary class="rv-limitations-toggle">Known limitations</summary>
+      <ul class="rv-limitations-list">
+        <li>Analysis is rule-based (heuristic / range-based estimate). No solver was run.</li>
+        <li>Exact EV is unavailable — all outputs use estimated ranges.</li>
+        <li>ICM calculations require payout structure data not present in ClubGG hand histories.</li>
+        <li>Opponent hole cards are never known — call/fold edges marked SPECULATIVE.</li>
+      </ul>
+    </details>
+    ${_rvNavBtns(hasPrev, hasNext)}`;
+
+  _rvBindNavBtns(revealEl);
+}
+
+function _rvNavBtns(hasPrev, hasNext) {
+  return `<div class="rs-reveal-btns">
+    <button class="rs-dec-btn" id="rv-prev-hand-reveal" ${hasPrev ? '' : 'disabled'}>‹ Prev</button>
+    <button class="rs-dec-btn rs-dec-btn--call" id="rv-next-hand-reveal" ${hasNext ? '' : 'disabled'}>Next ›</button>
+  </div>`;
+}
+
+function _rvBindNavBtns(revealEl) {
+  revealEl.querySelector('#rv-prev-hand-reveal')?.addEventListener('click', () => {
+    if (!_rs) return;
+    const { rvHandIdx: i, rvFilteredHands: fh, rvPanel: p } = _rs;
+    if (i > 0) { _rsStop(); _trOpenHand(p, fh, i - 1); }
+  });
+  revealEl.querySelector('#rv-next-hand-reveal')?.addEventListener('click', () => {
+    if (!_rs) return;
+    const { rvHandIdx: i, rvFilteredHands: fh, rvPanel: p } = _rs;
+    if (i < fh.length - 1) { _rsStop(); _trOpenHand(p, fh, i + 1); }
+  });
+}
+
+// ── Full timeline (all streets) ────────────────────────────────────────────
+
+function rsBuildFullTimeline(hand) {
+  const sRank = { PREFLOP: 0, FLOP: 1, TURN: 2, RIVER: 3 };
+  const bb    = parseFloat(hand.stakes_bb) || 1;
+  const seq   = [];
+  for (const hp of hand.hand_players) {
+    for (const act of (hp.actions || [])) {
+      seq.push({
+        playerId:     hp.player_id,
+        pos:          hp.position || `S${hp.seat_number}`,
+        username:     hp.username || hp.position || `S${hp.seat_number}`,
+        street:       act.street,
+        action_type:  act.action_type,
+        action_order: act.action_order,
+        amount:       act.amount ? parseFloat(act.amount) / bb : 0,
+        is_all_in:    act.is_all_in || false,
+      });
+    }
+  }
+  seq.sort((a, b) => {
+    const d = (sRank[a.street] ?? 99) - (sRank[b.street] ?? 99);
+    return d !== 0 ? d : a.action_order - b.action_order;
+  });
+  return seq;
+}
+
+// ── API helper ─────────────────────────────────────────────────────────────
+
+async function _trFetch(path) {
+  const token = authGetToken();
+  const res = await fetch(`/api/v1${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
 }

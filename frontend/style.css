@@ -635,6 +635,81 @@ html, body {
   gap: var(--sp-3);
 }
 
+/* ── Results Tab ── */
+.results-summary {
+  display: flex;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+
+.res-stat { display: flex; flex-direction: column; gap: 2px; }
+.res-stat-val { font-size: 22px; font-weight: 600; color: var(--text-primary); }
+.res-stat-lbl { font-size: var(--text-xs); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.res-pos { color: var(--green); }
+.res-neg { color: var(--red); }
+.res-neutral { color: var(--text-secondary); }
+
+.results-block {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: var(--sp-4);
+  margin-top: var(--sp-4);
+}
+
+.results-block-title {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-3);
+}
+
+.results-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.results-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.results-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-dim); color: var(--text-primary); }
+.results-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.res-chart { position: relative; }
+.res-chart svg { width: 100%; height: 220px; display: block; }
+.res-line { fill: none; stroke: var(--accent); stroke-width: 2px; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.res-zero { stroke: var(--border); stroke-width: 1px; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.res-cross { stroke: var(--text-muted); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.res-dot { fill: var(--accent); stroke: var(--bg-elevated); stroke-width: 2px; }
+.res-hit { fill: transparent; cursor: crosshair; }
+.res-axis {
+  position: absolute;
+  left: 0;
+  width: 42px;
+  transform: translateY(-50%);
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.res-tip {
+  position: absolute;
+  top: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 /* Per-hand findings section, below the stat-based leak cards */
 .hand-findings-header {
   margin-top: var(--sp-6);

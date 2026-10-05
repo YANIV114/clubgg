@@ -124,6 +124,13 @@
       >Leaks</button>
       <button
         class="tab-btn"
+        data-tab="results"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-results"
+      >Results</button>
+      <button
+        class="tab-btn"
         data-tab="plan"
         role="tab"
         aria-selected="false"
@@ -190,6 +197,16 @@
         aria-labelledby="tab-leaks"
       >
         <!-- Populated by renderLeaks() -->
+      </section>
+
+      <!-- Results Panel -->
+      <section
+        id="panel-results"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-results"
+      >
+        <!-- Populated by renderResults() -->
       </section>
 
       <!-- Tournament Plan Panel -->

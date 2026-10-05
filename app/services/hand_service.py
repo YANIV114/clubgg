@@ -381,8 +381,12 @@ async def hand_records_for_player(
             reached_showdown=reached_showdown,
             won_at_showdown=won_at_showdown,
         )
-        if hand.stakes_ante:
-            record = dataclasses.replace(record, has_ante=True)
+        net_bb = (
+            hero_hp.net_won / hand.stakes_bb
+            if hero_hp.net_won is not None and hand.stakes_bb
+            else None
+        )
+        record = dataclasses.replace(record, has_ante=bool(hand.stakes_ante), net_bb=net_bb)
         records.append(record)
         contexts[hand.external_id] = HandContext(
             board_cards=hand.board_cards,

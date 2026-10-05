@@ -12,6 +12,7 @@ let currentPlayerId = null;
 let statsData = null;
 let leaksData = null;
 let leakReportData = null;  // per-hand findings; null if unavailable
+let resultsData = null;     // chip results by position / depth; null if unavailable
 let planData = null;
 let sampleData = null;
 let activeTab = 'home';
@@ -486,6 +487,7 @@ const els = {
   homePanel:      () => document.getElementById('panel-home'),
   statsPanel:     () => document.getElementById('panel-stats'),
   leaksPanel:     () => document.getElementById('panel-leaks'),
+  resultsPanel:   () => document.getElementById('panel-results'),
   planPanel:      () => document.getElementById('panel-plan'),
   trainerPanel:   () => document.getElementById('panel-trainer'),
   reviewPanel:    () => document.getElementById('panel-review'),
@@ -526,6 +528,7 @@ async function loadPlayer(id) {
   statsData = null;
   leaksData = null;
   leakReportData = null;
+  resultsData = null;
   planData = null;
   sampleData = null;
   leakFilter = 'all';
@@ -536,13 +539,14 @@ async function loadPlayer(id) {
   showLoadingInPanels();
 
   try {
-    [statsData, leaksData, sampleData, leakReportData] = await Promise.all([
+    [statsData, leaksData, sampleData, leakReportData, resultsData] = await Promise.all([
       apiFetch(`/players/${encodeURIComponent(id)}/stats`),
       apiFetch(`/players/${encodeURIComponent(id)}/leaks`),
       apiFetch(`/players/${encodeURIComponent(id)}/sample`),
       // Optional: a failure here must not block the rest of the dashboard.
       // limit=1000 matches the /leaks default so both sections cover the same hands.
       apiFetch(`/players/${encodeURIComponent(id)}/leak-report?limit=1000`).catch(() => null),
+      apiFetch(`/players/${encodeURIComponent(id)}/results`).catch(() => null),
     ]);
 
     if (activeEl) {
@@ -555,6 +559,7 @@ async function loadPlayer(id) {
     renderHome();
     renderStats(statsData);
     renderLeaks(leaksData);
+    renderResults(resultsData);
     clearPanel(els.planPanel(), renderPlanEmpty);
     trainerState = null;
     renderTrainer();
@@ -563,6 +568,7 @@ async function loadPlayer(id) {
     statsData = null;
     leaksData = null;
     leakReportData = null;
+    resultsData = null;
     sampleData = null;
     if (activeEl) activeEl.innerHTML = `<span style="color:var(--red)">Load failed — ${escHtml(err.message)}</span>`;
     showErrorInPanels(err.message);
@@ -595,14 +601,14 @@ function switchTab(tab) {
 
 function showLoadingInPanels() {
   const spinner = `<div class="loading-state"><div class="spinner"></div>Loading player data…</div>`;
-  const panels = [els.statsPanel(), els.leaksPanel(), els.planPanel()];
+  const panels = [els.statsPanel(), els.leaksPanel(), els.resultsPanel(), els.planPanel()];
   panels.forEach(p => { if (p) p.innerHTML = spinner; });
   // Trainer panel shows its own empty state during load; do not clobber with spinner
 }
 
 function showErrorInPanels(msg) {
   const card = errorCard(msg);
-  const panels = [els.statsPanel(), els.leaksPanel(), els.planPanel()];
+  const panels = [els.statsPanel(), els.leaksPanel(), els.resultsPanel(), els.planPanel()];
   panels.forEach(p => { if (p) p.innerHTML = card; });
 }
 
@@ -1415,6 +1421,163 @@ function _renderLeakExamples(leak) {
     <div class="leak-examples-title">Hand examples (${exs.length})</div>
     ${rows}
   </div>`;
+}
+
+/* ============================================================
+   RESULTS TAB
+   Chip results by position and stack depth.  Every bb/100 shows its 95%
+   margin; a result is coloured only when the margin excludes zero.
+   ============================================================ */
+
+function _fmtBb(v, digits = 1) {
+  if (v == null) return '—';
+  const s = parseFloat(v).toFixed(digits);
+  const n = parseFloat(s);
+  if (n === 0) return (0).toFixed(digits);  // never "-0"
+  return `${n > 0 ? '+' : ''}${s}`;
+}
+
+function _resultCls(rate) {
+  if (!rate || rate.value == null || !rate.significant) return 'res-neutral';
+  return parseFloat(rate.value) >= 0 ? 'res-pos' : 'res-neg';
+}
+
+function _resultReading(rate) {
+  if (!rate || rate.value == null) return 'no data';
+  if (!rate.significant) return 'not established';
+  return parseFloat(rate.value) >= 0 ? 'winning' : 'losing';
+}
+
+function _renderResultTable(title, firstCol, rows) {
+  if (!rows || !rows.length) return '';
+  const body = rows.map(r => {
+    const b = r.bb_per_100;
+    return `<tr>
+      <td>${escHtml(r.label)}</td>
+      <td class="num">${escHtml(r.hands)}</td>
+      <td class="num">${escHtml(_fmtBb(r.total_bb, 0))}</td>
+      <td class="num ${_resultCls(b)}">${escHtml(_fmtBb(b.value))}</td>
+      <td class="num text-secondary">${b.margin != null ? '±' + escHtml(parseFloat(b.margin).toFixed(0)) : '—'}</td>
+      <td class="text-secondary">${escHtml(_resultReading(b))}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="results-block">
+    <div class="results-block-title">${escHtml(title)}</div>
+    <table class="results-table">
+      <thead><tr>
+        <th>${escHtml(firstCol)}</th><th class="num">Hands</th><th class="num">Total bb</th>
+        <th class="num">bb/100</th><th class="num">95% margin</th><th>Reading</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
+}
+
+function _renderResultCurve(curve, handCount) {
+  if (!curve || curve.length < 2) return '';
+  const W = 800, H = 220, PAD_L = 48, PAD_R = 12, PAD_T = 12, PAD_B = 24;
+  const vals = curve.map(v => parseFloat(v));
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  const span = hi - lo || 1;
+  const x = i => PAD_L + (i / (vals.length - 1)) * (W - PAD_L - PAD_R);
+  const y = v => PAD_T + (1 - (v - lo) / span) * (H - PAD_T - PAD_B);
+  const path = vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  // Axis labels are HTML, not SVG text: the SVG stretches horizontally, which
+  // would distort glyphs.  Skip the zero label when it would collide.
+  const tickVals = [hi, lo];
+  if (lo < 0 && hi > 0 && Math.min(y(0) - y(hi), y(lo) - y(0)) > 16) tickVals.push(0);
+  const ticks = tickVals.map(v =>
+    `<span class="res-axis" style="top:${((y(v) / H) * 100).toFixed(2)}%">${escHtml(_fmtBb(v, 0))}</span>`
+  ).join('');
+  return `<div class="results-block">
+    <div class="results-block-title">Cumulative result (bb) over ${escHtml(handCount)} hands</div>
+    <div class="res-chart" data-hands="${escHtml(handCount)}" data-curve="${escHtml(JSON.stringify(vals))}">
+      ${ticks}
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+           aria-label="Cumulative chip result in big blinds, ending at ${_fmtBb(vals[vals.length - 1], 0)} bb">
+        <line x1="${PAD_L}" x2="${W - PAD_R}" y1="${y(0)}" y2="${y(0)}" class="res-zero"/>
+        <path d="${path}" class="res-line"/>
+        <line class="res-cross" x1="0" x2="0" y1="${PAD_T}" y2="${H - PAD_B}" visibility="hidden"/>
+        <circle class="res-dot" r="4" visibility="hidden"/>
+        <rect class="res-hit" x="${PAD_L}" y="0" width="${W - PAD_L - PAD_R}" height="${H}"/>
+      </svg>
+      <div class="res-tip" hidden></div>
+    </div>
+  </div>`;
+}
+
+function _bindResultCurve(panel) {
+  const box = panel.querySelector('.res-chart');
+  if (!box) return;
+  const vals = JSON.parse(box.dataset.curve);
+  const hands = parseInt(box.dataset.hands, 10);
+  const svg = box.querySelector('svg');
+  const hit = box.querySelector('.res-hit');
+  const cross = box.querySelector('.res-cross');
+  const dot = box.querySelector('.res-dot');
+  const tip = box.querySelector('.res-tip');
+  const path = box.querySelector('.res-line');
+  const W = 800, PAD_L = 48, PAD_R = 12;
+
+  hit.addEventListener('mousemove', ev => {
+    const pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    const local = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const frac = Math.min(1, Math.max(0, (local.x - PAD_L) / (W - PAD_L - PAD_R)));
+    const i = Math.round(frac * (vals.length - 1));
+    // Read the y position back from the drawn path so the dot sits on the line.
+    const seg = path.getAttribute('d').split(/[ML]/).filter(Boolean)[i].split(',');
+    const cx = parseFloat(seg[0]), cy = parseFloat(seg[1]);
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx);
+    cross.setAttribute('visibility', 'visible');
+    dot.setAttribute('cx', cx); dot.setAttribute('cy', cy);
+    dot.setAttribute('visibility', 'visible');
+    const handNo = Math.max(1, Math.round((i / (vals.length - 1)) * hands));
+    tip.textContent = `Hand ~${handNo}: ${_fmtBb(vals[i], 1)} bb`;
+    tip.hidden = false;
+    const rect = box.getBoundingClientRect();
+    tip.style.left = `${Math.min(ev.clientX - rect.left + 12, rect.width - 160)}px`;
+  });
+  hit.addEventListener('mouseleave', () => {
+    cross.setAttribute('visibility', 'hidden');
+    dot.setAttribute('visibility', 'hidden');
+    tip.hidden = true;
+  });
+}
+
+function renderResults(data) {
+  const panel = els.resultsPanel();
+  if (!panel) return;
+  if (!data) {
+    panel.innerHTML = `<div class="empty-state"><div class="empty-state-title">Results unavailable.</div></div>`;
+    return;
+  }
+  if (!data.hand_count) {
+    panel.innerHTML = `<div class="empty-state"><div class="empty-state-title">No hands with a known result yet.</div></div>`;
+    return;
+  }
+
+  const b = data.bb_per_100;
+  const missing = data.hands_without_result
+    ? ` ${data.hands_without_result} hand(s) without a reconciled result are excluded.`
+    : '';
+  let html = `<div class="results-summary">
+    <div class="res-stat"><span class="res-stat-val">${escHtml(data.hand_count)}</span><span class="res-stat-lbl">Hands</span></div>
+    <div class="res-stat"><span class="res-stat-val ${_resultCls(b)}">${escHtml(_fmtBb(data.total_bb, 0))} bb</span><span class="res-stat-lbl">Total</span></div>
+    <div class="res-stat"><span class="res-stat-val ${_resultCls(b)}">${escHtml(_fmtBb(b.value))}</span><span class="res-stat-lbl">bb/100 (±${b.margin != null ? escHtml(parseFloat(b.margin).toFixed(0)) : '—'})</span></div>
+  </div>
+  <div class="leaks-summary">
+    Chip results, not money — tournament ICM is not modelled. Results swing by tens of bb per
+    hand, so each bb/100 shows a 95% margin; only results whose margin excludes zero are
+    coloured.${escHtml(missing)}
+  </div>`;
+
+  html += _renderResultCurve(data.cumulative_bb, data.hand_count);
+  html += _renderResultTable('By position', 'Position', data.by_position);
+  html += _renderResultTable('By effective stack', 'Stack', data.by_depth);
+
+  panel.innerHTML = html;
+  _bindResultCurve(panel);
 }
 
 /* ============================================================

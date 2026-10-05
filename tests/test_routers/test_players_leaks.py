@@ -281,3 +281,33 @@ async def test_leak_report_empty_player(
     data = (await async_client.get(f"/api/v1/players/{player_no_hands.id}/leak-report")).json()
     assert data["total_hands_analyzed"] == 0
     assert data["leaks"] == []
+
+
+# ── Results ───────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+async def test_results_404_unknown_player(async_client: AsyncClient, ingested: None) -> None:
+    resp = await async_client.get("/api/v1/players/00000000-0000-0000-0000-000000000000/results")
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_results_shape(async_client: AsyncClient, alice: Player) -> None:
+    resp = await async_client.get(f"/api/v1/players/{alice.id}/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    # Every fixture hand is counted, with or without a reconciled result.
+    assert data["hand_count"] + data["hands_without_result"] == 4
+    assert len(data["cumulative_bb"]) == data["hand_count"]
+    for key in ("value", "n", "margin", "significant", "label"):
+        assert key in data["bb_per_100"]
+    assert data["bb_per_100"]["label"] == "derived"
+
+
+@pytest.mark.integration
+async def test_results_empty_player(async_client: AsyncClient, player_no_hands: Player) -> None:
+    data = (await async_client.get(f"/api/v1/players/{player_no_hands.id}/results")).json()
+    assert data["hand_count"] == 0
+    assert data["by_position"] == []
+    assert data["cumulative_bb"] == []

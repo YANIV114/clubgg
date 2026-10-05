@@ -1,3 +1,4 @@
+import dataclasses
 import uuid
 from datetime import UTC, datetime
 
@@ -8,11 +9,13 @@ from app.dependencies import DBSession
 from app.features.leak_examples import build_leak_examples
 from app.features.leaks import analyze_leaks
 from app.features.player_stats import compute_player_stats
+from app.features.results import compute_results
 from app.features.tournament_plan import build_tournament_plan
 from app.schemas.common import PaginatedResponse
 from app.schemas.leak_report import LeakReportOut
 from app.schemas.leaks import LeakExampleOut, LeakOut, PlayerLeaksOut
 from app.schemas.player import ClubOut, PlayerDetailOut, PlayerOut, PlayerSampleOut
+from app.schemas.results import PlayerResultsOut
 from app.schemas.stats import PlayerStatsOut
 from app.schemas.tournament_plan import StudyPriorityOut, TournamentPlanOut, TournamentPlanRequest
 from app.services.hand_service import hand_records_for_player
@@ -100,6 +103,36 @@ async def get_player_stats(
     stats = compute_player_stats(player_id=player_id, hands=records)
     out = PlayerStatsOut.model_validate(stats, from_attributes=True)
     return out.model_copy(update={"player_name": player.username})
+
+
+# ── Results endpoint ─────────────────────────────────────────────────────────
+
+
+@router.get("/{player_id}/results", response_model=PlayerResultsOut)
+async def get_player_results(
+    player_id: uuid.UUID,
+    db: DBSession,
+    limit: int = Query(10000, ge=1, le=10000, description="Max hands to load"),
+    from_date: datetime | None = Query(None, description="Filter hands from this UTC datetime"),
+    to_date: datetime | None = Query(None, description="Filter hands up to this UTC datetime"),
+) -> PlayerResultsOut:
+    """
+    Chip results (bb) by position and effective stack depth, with a running
+    total.  Each bb/100 carries a 95% margin; ``significant`` means the margin
+    excludes zero.  Chip results, not money: tournament ICM is not modelled.
+    """
+    player = await get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    records, _ = await hand_records_for_player(
+        db, player_id, limit=limit, from_date=from_date, to_date=to_date
+    )
+    # Records come newest-first; the running total needs chronological order.
+    results = compute_results(list(reversed(records)))
+    return PlayerResultsOut.model_validate(
+        {"player_id": player_id, **dataclasses.asdict(results)}
+    )
 
 
 # ── Leaks endpoint ───────────────────────────────────────────────────────────

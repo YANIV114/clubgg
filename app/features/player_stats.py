@@ -242,6 +242,8 @@ class HandRecord:
     # ── Hand context ──────────────────────────────────────────────────────────
     # True when the hand had antes (tournament levels). Selects leak baselines.
     has_ante: bool = field(default=False)
+    # Net chips won in the hand / big blind.  None when the result is unknown.
+    net_bb: Decimal | None = field(default=None)
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.billing import SubscriptionPlan
 from app.services.billing_service import PLAN_DEFINITIONS
+from tests.conftest import TEST_INVITE_CODE
+
+pytestmark = pytest.mark.usefixtures("beta_gate")
 
 
 def _unique_email(prefix: str) -> str:
@@ -24,7 +27,7 @@ def _unique_email(prefix: str) -> str:
 async def _register(client: AsyncClient, email: str) -> tuple[str, str]:
     resp = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "testpass123"},
+        json={"email": email, "password": "testpass123", "invite_code": TEST_INVITE_CODE},
     )
     assert resp.status_code == 201
     data = resp.json()
@@ -142,7 +145,11 @@ class TestWebhook:
         # Register a user
         resp = await async_client.post(
             "/api/v1/auth/register",
-            json={"email": _unique_email("webhook_co1"), "password": "testpass123"},
+            json={
+                "email": _unique_email("webhook_co1"),
+                "password": "testpass123",
+                "invite_code": TEST_INVITE_CODE,
+            },
         )
         user_id = resp.json()["user"]["id"]
         token = resp.json()["access_token"]
@@ -180,7 +187,11 @@ class TestWebhook:
     async def test_subscription_deleted_cancels(self, async_client: AsyncClient) -> None:
         resp = await async_client.post(
             "/api/v1/auth/register",
-            json={"email": _unique_email("webhook_del1"), "password": "testpass123"},
+            json={
+                "email": _unique_email("webhook_del1"),
+                "password": "testpass123",
+                "invite_code": TEST_INVITE_CODE,
+            },
         )
         user_id = resp.json()["user"]["id"]
         token = resp.json()["access_token"]
@@ -244,7 +255,11 @@ class TestPortalSession:
         # Set up a user with a Stripe subscription via webhook
         resp = await async_client.post(
             "/api/v1/auth/register",
-            json={"email": _unique_email("stripe_po2"), "password": "testpass123"},
+            json={
+                "email": _unique_email("stripe_po2"),
+                "password": "testpass123",
+                "invite_code": TEST_INVITE_CODE,
+            },
         )
         user_id = resp.json()["user"]["id"]
         token = resp.json()["access_token"]

@@ -239,6 +239,10 @@ class HandRecord:
     postflop_bets_raises: int = field(default=0)
     postflop_calls: int = field(default=0)
 
+    # ── Hand context ──────────────────────────────────────────────────────────
+    # True when the hand had antes (tournament levels). Selects leak baselines.
+    has_ante: bool = field(default=False)
+
 
 # ---------------------------------------------------------------------------
 # Output types

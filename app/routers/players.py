@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 
 from app.dependencies import DBSession
 from app.features.leak_examples import build_leak_examples
-from app.features.leaks import LeakDetector, analysis_note
+from app.features.leaks import analyze_leaks
 from app.features.player_stats import compute_player_stats
 from app.features.tournament_plan import build_tournament_plan
 from app.schemas.common import PaginatedResponse
@@ -125,9 +125,8 @@ async def get_player_leaks(
     records, contexts = await hand_records_for_player(
         db, player_id, limit=limit, from_date=from_date, to_date=to_date
     )
-    stats = compute_player_stats(player_id=player_id, hands=records)
-    detector = LeakDetector()
-    leaks = detector.detect(stats)
+    analysis = analyze_leaks(player_id, records)
+    leaks = analysis.leaks
 
     leak_outs: list[LeakOut] = []
     for leak in leaks:
@@ -164,9 +163,9 @@ async def get_player_leaks(
 
     return PlayerLeaksOut(
         player_id=player_id,
-        hand_count=stats.hand_count,
+        hand_count=analysis.stats.hand_count,
         leaks=leak_outs,
-        analysis_note=analysis_note(stats.hand_count, len(leaks)),
+        analysis_note=analysis.note,
     )
 
 
@@ -191,14 +190,12 @@ async def get_tournament_plan(
     records, _ = await hand_records_for_player(
         db, player_id, limit=body.limit, from_date=from_date, to_date=to_date
     )
-    stats = compute_player_stats(player_id=player_id, hands=records)
-    detector = LeakDetector()
-    leaks = detector.detect(stats)
+    analysis = analyze_leaks(player_id, records)
 
     plan = build_tournament_plan(
         player_id=player_id,
-        stats=stats,
-        leaks=leaks,
+        stats=analysis.stats,
+        leaks=analysis.leaks,
         tournament_format=body.tournament_format,
         stage=body.stage,
         stack_bb=body.stack_bb,
@@ -467,7 +464,7 @@ async def export_player_report(
 
     records, _ = await hand_records_for_player(db, player_id, limit=limit)
     stats = compute_player_stats(player_id=player_id, hands=records)
-    leaks = LeakDetector().detect(stats)
+    leaks = analyze_leaks(player_id, records).leaks
 
     html = _build_report_html(player_id, player.username, stats, leaks)
     filename = f"clubgg-report-{player.username}.html"

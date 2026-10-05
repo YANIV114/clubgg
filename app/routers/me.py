@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.db.session import AsyncSessionFactory, get_db
 from app.dependencies import require_tester
 from app.features.leak_examples import build_leak_examples
-from app.features.leaks import LeakDetector, analysis_note
+from app.features.leaks import analyze_leaks
 from app.features.player_stats import compute_player_stats
 from app.ingestion.hand_parser import _HAND_BLOCK_RE, HandHistoryFileIngestor, HandHistoryParser
 from app.models.hand import Hand, HandPlayer
@@ -183,13 +183,14 @@ async def get_my_analysis(
     records, contexts = await hand_records_for_player(
         session, player.id, limit=limit, from_date=from_date, to_date=to_date
     )
+    # Stats shown are over all hands; leaks use the filtered leak sample.
     stats = compute_player_stats(player_id=player.id, hands=records)
-    detector = LeakDetector()
-    leaks = detector.detect(stats)
+    analysis = analyze_leaks(player.id, records)
+    leaks = analysis.leaks
     leak_outs = _build_leak_outs(leaks[:5], records, contexts)
 
     biggest = leaks[0].title if leaks else None
-    note = analysis_note(stats.hand_count, len(leaks))
+    note = analysis.note
 
     return MeAnalysisOut(
         player_id=player.id,
@@ -203,7 +204,7 @@ async def get_my_analysis(
         stats=PlayerStatsOut.model_validate(stats, from_attributes=True),
         leaks=PlayerLeaksOut(
             player_id=player.id,
-            hand_count=stats.hand_count,
+            hand_count=analysis.stats.hand_count,
             leaks=leak_outs,
             analysis_note=note,
         ),
@@ -240,16 +241,13 @@ async def get_my_leaks(
     records, contexts = await hand_records_for_player(
         session, player.id, limit=limit, from_date=from_date, to_date=to_date
     )
-    stats = compute_player_stats(player_id=player.id, hands=records)
-    detector = LeakDetector()
-    leaks = detector.detect(stats)
-    leak_outs = _build_leak_outs(leaks, records, contexts)
-    note = analysis_note(stats.hand_count, len(leaks))
+    analysis = analyze_leaks(player.id, records)
+    leak_outs = _build_leak_outs(analysis.leaks, records, contexts)
     return PlayerLeaksOut(
         player_id=player.id,
-        hand_count=stats.hand_count,
+        hand_count=analysis.stats.hand_count,
         leaks=leak_outs,
-        analysis_note=note,
+        analysis_note=analysis.note,
     )
 
 

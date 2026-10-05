@@ -2,6 +2,7 @@
 Service layer for Hand ingestion and queries.
 """
 
+import dataclasses
 import uuid
 from datetime import datetime
 from typing import Any
@@ -380,6 +381,8 @@ async def hand_records_for_player(
             reached_showdown=reached_showdown,
             won_at_showdown=won_at_showdown,
         )
+        if hand.stakes_ante:
+            record = dataclasses.replace(record, has_ante=True)
         records.append(record)
         contexts[hand.external_id] = HandContext(
             board_cards=hand.board_cards,

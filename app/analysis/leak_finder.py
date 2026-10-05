@@ -4,8 +4,8 @@ Leak finder — pattern detection across analyzed hands.
 Pure module: no DB, no IO. Takes a list of AnalyzedHandRecord (HandAnalysisResult
 paired with hand metadata) and returns a LeakReport with LeakFinding instances.
 
-This module is SEPARATE from leak_engine.py:
-- leak_engine.py: aggregate stats (VPIP/PFR/3bet%) → structural leaks from raw hand data
+This module is SEPARATE from app/features/leaks.py:
+- features/leaks.py: aggregate stats (VPIP/PFR/3bet%) → structural leaks from raw hand data
 - leak_finder.py: per-hand HandAnalysisResult patterns → behavioral leaks from engine outputs
 
 Confidence tiers

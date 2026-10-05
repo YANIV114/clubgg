@@ -7007,8 +7007,8 @@ async function _anInitHub() {
   ];
 
   const recentHands = [
-    { stage: 'Final Table', stageClass: 'an-stage--final',  stack: '22bb', cards: 'A\u2660 K\u2665', desc: 'BTN open \u00b7 3-bet pot \u00b7 c-bet fold',               result: '+18.5',   pos: true,  mistake: false },
-    { stage: 'Bubble',      stageClass: 'an-stage--bubble', stack: '14bb', cards: 'Q\u2666 Q\u2663', desc: 'SB shove vs BTN open',                                    result: '+42.0',   pos: true,  mistake: false },
+    { stage: 'Final Table', stageClass: 'an-stage--final',  stack: '22bb', cards: 'A\u2660 K\u2665', desc: 'BTN open \u00b7 3-bet pot \u00b7 c-bet fold',               result: '18.5',    pos: true,  mistake: false },
+    { stage: 'Bubble',      stageClass: 'an-stage--bubble', stack: '14bb', cards: 'Q\u2666 Q\u2663', desc: 'SB shove vs BTN open',                                    result: '42.0',    pos: true,  mistake: false },
     { stage: 'ITM',         stageClass: 'an-stage--itm',    stack: '31bb', cards: 'J\u2660 T\u2660', desc: 'BB defend \u00b7 check-raise flop \u00b7 folded turn',    result: '\u221211.0', pos: false, mistake: true,  mistakeLabel: 'Timing leak' },
     { stage: 'Early',       stageClass: 'an-stage--early',  stack: '80bb', cards: '9\u2663 9\u2666', desc: 'CO open \u00b7 folded to 3-bet',                          result: '\u22122.5',  pos: false, mistake: true,  mistakeLabel: 'BTN fold too often' },
     { stage: 'Bubble',      stageClass: 'an-stage--bubble', stack: '18bb', cards: '7\u2665 7\u2660', desc: 'UTG shove \u00b7 called by AK \u00b7 lost',               result: '\u221218.0', pos: false, mistake: false },

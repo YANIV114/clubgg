@@ -2279,6 +2279,11 @@ function renderHand(handStr) {
   }).join('<span class="card-gap">\u2009</span>');
 }
 
+// A drill may accept more than one answer (drill.alt) where two lines are standard.
+function _isAcceptable(drill, v) {
+  return v === drill.ok || (drill.alt || []).includes(v);
+}
+
 function btnClass(v) {
   switch (v) {
     case 'fold':    return 'btn-fold';
@@ -2920,6 +2925,8 @@ function renderTrainer() {
         <div class="trainer-start-leaks-label">Targeted leaks:</div>
         ${leakListHtml}
         <button class="btn-primary trainer-start-btn" id="trainer-start-btn">Start Drill Session</button>
+        <button class="btn-secondary trainer-start-btn trainer-real-btn" id="trainer-real-btn">Drill your real spots: facing a raise</button>
+        <div class="trainer-real-desc">12 spots from your own hands (SB / BTN / CO / HJ facing one open, 30bb+). Mostly spots you played wrong, mixed with ones you got right.</div>
         ${_historyWidget(loadTrainerHistory())}
       </div>
     </div>`;
@@ -2927,6 +2934,7 @@ function renderTrainer() {
     document.getElementById('trainer-start-btn').addEventListener('click', () => {
       startTrainerSession(drillPool, drillCount);
     });
+    document.getElementById('trainer-real-btn').addEventListener('click', startRealSpotSession);
     return;
   }
 
@@ -2991,9 +2999,13 @@ function renderTrainer() {
       </div>
     </div>`;
 
-    document.getElementById('trainer-again-btn').addEventListener('click', () => {
+    const wasRealSpots = drills[0] && drills[0].lk === 'vs_raise_real';
+    const againBtn = document.getElementById('trainer-again-btn');
+    if (wasRealSpots) againBtn.textContent = 'Drill again — new set of your spots';
+    againBtn.addEventListener('click', () => {
       trainerState = null;
-      renderTrainer();
+      if (wasRealSpots) startRealSpotSession();
+      else renderTrainer();
     });
     return;
   }
@@ -3114,6 +3126,75 @@ function startTrainerSession(pool, count, opts = {}) {
     coachMode:      opts.coachMode || false,
   };
   renderTrainer();
+}
+
+/* ── Real-spot drills: facing a single raise, from the player's own hands ── */
+
+const _SUIT_SYM = { s: '♠', h: '♥', d: '♦', c: '♣' };
+// The trainer table is drawn 6-max; map 8/9-max seat names onto it.
+const _TABLE_SEAT = { HJ: 'MP', LJ: 'MP', UTG1: 'UTG', UTG2: 'UTG' };
+const _REAL_ACTION = { '3bet': 'threbet', call: 'call', fold: 'fold' };
+const _REAL_ACTION_TEXT = { threbet: '3-bet', call: 'called', fold: 'folded' };
+
+function _cardsToSymbols(hole) {
+  return (hole || '').split(/\s+/).filter(Boolean)
+    .map(c => `${c.slice(0, -1)}${_SUIT_SYM[c.slice(-1).toLowerCase()] || ''}`)
+    .join(' ');
+}
+
+function _realSpotToDrill(spot) {
+  const rec = spot.recommendation;
+  const ok = _REAL_ACTION[rec.best];
+  const alt = (rec.acceptable || []).map(a => _REAL_ACTION[a]).filter(a => a !== ok);
+  const raise = parseFloat(spot.raise_to_bb).toFixed(1);
+  const eff = parseFloat(spot.eff_bb).toFixed(0);
+  const seat = _TABLE_SEAT[spot.position] || spot.position;
+  const opener = _TABLE_SEAT[spot.opener_position] || spot.opener_position;
+  const behind = spot.position === 'SB' ? ' The BB is still to act behind you.' : '';
+  const you = _REAL_ACTION[spot.hero_action];
+  const fbFor = v => (_isAcceptable({ ok, alt }, v) ? '' : 'Not the best line here. ') + rec.reason;
+  return {
+    lk: 'vs_raise_real',
+    sit: `${spot.opener_position} opens to ${raise}bb. It folds to you in the ${spot.position}.${behind}`,
+    hand: _cardsToSymbols(spot.hole_cards),
+    ctx: `${seat} facing ${opener} open to ${raise}bb · ${eff}bb eff · 6-max`,
+    opts: [
+      { v: 'fold',    t: 'Fold' },
+      { v: 'call',    t: 'Call' },
+      { v: 'threbet', t: '3-bet' },
+    ],
+    ok,
+    alt,
+    fb: { fold: fbFor('fold'), call: fbFor('call'), threbet: fbFor('threbet') },
+    real_note: `In the real hand (#${spot.hand_external_id.slice(-9)}) you ${_REAL_ACTION_TEXT[you]}. `
+      + `Recommendation source: ${rec.backing}, not solver output.`,
+  };
+}
+
+async function startRealSpotSession() {
+  const btn = document.getElementById('trainer-real-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading your spots…'; }
+  try {
+    const data = await apiFetch(`/players/${encodeURIComponent(currentPlayerId)}/drills/vs-raise?limit=12`);
+    const drills = _shuffle((data.spots || []).map(_realSpotToDrill));
+    if (!drills.length) {
+      if (btn) btn.textContent = 'No facing-a-raise spots found at 30bb+';
+      return;
+    }
+    const title = 'Facing a raise — your real hands';
+    drills.forEach((d, i) => Object.assign(d, {
+      leak_title: title, leak_severity: 'high', real_example: null,
+      is_group_start: i === 0, group_num: 1, drill_in_group: i + 1,
+      group_size: drills.length, _total_groups: 1,
+    }));
+    trainerState = {
+      drills, idx: 0, score: 0, answered: false, chosen: null, phase: 'replay', coachMode: false,
+      perLeakResults: { vs_raise_real: { title, severity: 'high', correct: 0, total: 0 } },
+    };
+    renderTrainer();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = `Couldn't load spots: ${err.message}`; }
+  }
 }
 
 /* ============================================================
@@ -3358,8 +3439,8 @@ function renderDrill() {
     for (const opt of drill.opts) {
       let extraCls = '';
       if (answered) {
-        if (opt.v === drill.ok)                        extraCls = ' btn-selected-correct';
-        else if (opt.v === chosen && chosen !== drill.ok) extraCls = ' btn-selected-wrong';
+        if (_isAcceptable(drill, opt.v))                          extraCls = ' btn-selected-correct';
+        else if (opt.v === chosen && !_isAcceptable(drill, chosen)) extraCls = ' btn-selected-wrong';
       }
       buttonsHtml += `<button class="action-btn ${btnClass(opt.v)}${extraCls}" data-val="${escHtml(opt.v)}" ${answered ? 'disabled' : ''}>${escHtml(optLabel(opt))}</button>`;
     }
@@ -3367,16 +3448,17 @@ function renderDrill() {
 
     let feedbackHtml = '';
     if (answered) {
-      const isCorrect = chosen === drill.ok;
+      const isCorrect = _isAcceptable(drill, chosen);
       const feedbackCls = isCorrect ? 'is-correct' : 'is-wrong';
       const icon = isCorrect ? '\u2713' : '\u2717';
       const correctOptLabel = drill.opts.find(o => o.v === drill.ok)?.t || drill.ok;
       const verdictText = isCorrect
-        ? 'Correct'
+        ? (chosen === drill.ok ? 'Correct' : `Acceptable \u2014 best: ${escHtml(correctOptLabel)}`)
         : `Wrong \u2014 correct: ${escHtml(correctOptLabel)}`;
       feedbackHtml = `<div class="drill-feedback ${feedbackCls}">
         <div class="feedback-verdict"><span class="feedback-icon">${icon}</span>${verdictText}</div>
         <div class="feedback-text">${escHtml(drill.fb[chosen] || drill.fb[drill.ok] || '')}</div>
+        ${drill.real_note ? `<div class="feedback-real">${escHtml(drill.real_note)}</div>` : ''}
       </div>
       <button class="btn-next" id="drill-next-btn">${idx + 1 < total ? 'Next Drill \u2192' : 'See Results'}</button>`;
     }
@@ -3399,7 +3481,7 @@ function renderDrill() {
 function submitAnswer(val) {
   if (!trainerState || trainerState.answered) return;
   const drill = trainerState.drills[trainerState.idx];
-  const isCorrect = val === drill.ok;
+  const isCorrect = _isAcceptable(drill, val);
   trainerState.answered = true;
   trainerState.chosen   = val;
   if (isCorrect) trainerState.score += 1;

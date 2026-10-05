@@ -12,12 +12,14 @@ from app.features.player_stats import compute_player_stats
 from app.features.results import compute_results
 from app.features.tournament_plan import build_tournament_plan
 from app.schemas.common import PaginatedResponse
+from app.schemas.drills import DrillRecommendationOut, DrillSpotOut, VsRaiseDrillsOut
 from app.schemas.leak_report import LeakReportOut
 from app.schemas.leaks import LeakExampleOut, LeakOut, PlayerLeaksOut
 from app.schemas.player import ClubOut, PlayerDetailOut, PlayerOut, PlayerSampleOut
 from app.schemas.results import PlayerResultsOut
 from app.schemas.stats import PlayerStatsOut
 from app.schemas.tournament_plan import StudyPriorityOut, TournamentPlanOut, TournamentPlanRequest
+from app.services.drill_service import vs_raise_drills
 from app.services.hand_service import hand_records_for_player
 from app.services.leak_report_service import build_leak_report
 from app.services.player_service import (
@@ -130,9 +132,7 @@ async def get_player_results(
     )
     # Records come newest-first; the running total needs chronological order.
     results = compute_results(list(reversed(records)))
-    return PlayerResultsOut.model_validate(
-        {"player_id": player_id, **dataclasses.asdict(results)}
-    )
+    return PlayerResultsOut.model_validate({"player_id": player_id, **dataclasses.asdict(results)})
 
 
 # ── Leaks endpoint ───────────────────────────────────────────────────────────
@@ -224,6 +224,43 @@ async def get_player_leak_report(
         db, player_id, limit=limit, from_date=from_date, to_date=to_date
     )
     return LeakReportOut.model_validate(report, from_attributes=True)
+
+
+@router.get("/{player_id}/drills/vs-raise", response_model=VsRaiseDrillsOut)
+async def get_vs_raise_drills(
+    player_id: uuid.UUID,
+    db: DBSession,
+    limit: int = Query(12, ge=1, le=50, description="Max spots to return"),
+) -> VsRaiseDrillsOut:
+    """
+    Drill spots from the player's own hands: facing a single preflop raise
+    (not in the BB, 30bb+ effective).  Spots where the player's real action
+    was outside the recommended set come first.
+    """
+    player = await get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    drills = await vs_raise_drills(db, player_id, player.username, limit=limit)
+    return VsRaiseDrillsOut(
+        player_id=player_id,
+        total_spots=drills.total_spots,
+        mistakes=drills.mistakes,
+        mistakes_by_position=drills.mistakes_by_position,
+        spots=[
+            DrillSpotOut(
+                **dataclasses.asdict(d.spot),
+                was_mistake=d.was_mistake,
+                recommendation=DrillRecommendationOut(
+                    **{
+                        **dataclasses.asdict(d.recommendation),
+                        "acceptable": list(d.recommendation.acceptable),
+                    }
+                ),
+            )
+            for d in drills.spots
+        ],
+    )
 
 
 # ── Tournament plan ───────────────────────────────────────────────────────────

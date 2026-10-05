@@ -311,3 +311,26 @@ async def test_results_empty_player(async_client: AsyncClient, player_no_hands: 
     assert data["hand_count"] == 0
     assert data["by_position"] == []
     assert data["cumulative_bb"] == []
+
+
+# ── Real-spot drills ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+async def test_drills_404_unknown_player(async_client: AsyncClient, ingested: None) -> None:
+    resp = await async_client.get(
+        "/api/v1/players/00000000-0000-0000-0000-000000000000/drills/vs-raise"
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_drills_shape(async_client: AsyncClient, alice: Player) -> None:
+    resp = await async_client.get(f"/api/v1/players/{alice.id}/drills/vs-raise")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["player_id"] == str(alice.id)
+    assert data["total_spots"] >= len(data["spots"])
+    assert data["mistakes"] == sum(data["mistakes_by_position"].values())
+    for spot in data["spots"]:
+        assert spot["recommendation"]["best"] in spot["recommendation"]["acceptable"]

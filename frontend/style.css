@@ -12331,3 +12331,8 @@ details[open] .rv-limitations-toggle::before { content: '▾ '; }
 .rv-exploit-conf--low    { background: rgba(255, 180, 0, 0.10); color: rgba(255, 180, 0, 0.50); }
 .rv-exploit-conf--medium { background: rgba(255, 180, 0, 0.18); color: rgba(255, 180, 0, 0.70); }
 .rv-exploit-conf--high   { background: rgba(255, 180, 0, 0.28); color: rgba(255, 180, 0, 0.95); }
+
+/* Real-spot drills */
+.trainer-real-btn { margin-top: var(--sp-3); }
+.trainer-real-desc { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-2); }
+.feedback-real { margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); }

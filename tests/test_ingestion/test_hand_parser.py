@@ -387,6 +387,289 @@ class TestActionOrdering:
             assert max(river_orders) < min(show_orders)
 
 
+# ── GGPoker tournament format ─────────────────────────────────────────────────
+
+# Synthetic hand in the GGPoker/ClubGG tournament export format. The ante is
+# not in the header (only "Level14(600/1,200)"); it appears only as
+# "posts the ante" lines in the preamble.
+_GG_TOURNAMENT_HAND = """\
+Poker Hand #tour_900000001: Tournament #1000001, Test GTD NLH No Limit - Level14(600/1,200) - 2026/04/18 23:23:51
+Table '' 8-max Seat #2 is the button
+Seat 1: aaaa1111 (50,000 in chips)
+Seat 2: bbbb2222 (40,000 in chips)
+Seat 4: cccc3333 (30,000 in chips)
+Seat 5: Hero (16,200 in chips)
+aaaa1111: posts the ante 180
+bbbb2222: posts the ante 180
+cccc3333: posts the ante 180
+Hero: posts the ante 180
+cccc3333: posts small blind 600
+Hero: posts big blind 1,200
+*** HOLE CARDS ***
+Dealt to aaaa1111
+Dealt to bbbb2222
+Dealt to cccc3333
+Dealt to Hero [Qh 4h]
+aaaa1111: folds
+bbbb2222: raises 1,440 to 2,640
+cccc3333: folds
+Hero: folds
+Uncalled bet (1,440) returned to bbbb2222
+*** SHOWDOWN ***
+bbbb2222 collected 3,720 from pot
+*** SUMMARY ***
+Total pot 3,720
+Seat 1: aaaa1111 folded before Flop
+Seat 2: bbbb2222 won (3,720)
+Seat 4: cccc3333(small blind) folded before Flop
+Seat 5: Hero(big blind) folded before Flop
+"""
+
+# Real-format all-in with a split pot (names anonymised).  Hero (BB) calls a
+# raise, check-raises all-in on the flop, villain calls; board plays, pot split.
+#   Hero:     180 ante + 2,640 pre + 13,384 flop = 16,204 (whole stack); wins 16,954 → +750
+#   ffff6666: same 16,204 in; wins 16,954 → +750
+#   dddd4444 (SB): 180 + 600 = 780 → -780;   four others: -180 each
+_GG_SPLIT_POT_HAND = """\
+Poker Hand #tour_900000002: Tournament #1000001, Test GTD NLH No Limit - Level14(600/1,200) - 2026/04/18 23:23:51
+Table '' 8-max Seat #2 is the button
+Seat 7: gggg7777 (74,397 in chips)
+Seat 2: bbbb2222 (72,691 in chips)
+Seat 4: dddd4444 (44,578 in chips)
+Seat 8: ffff6666 (81,520 in chips)
+Seat 6: eeee5555 (39,089 in chips)
+Seat 5: Hero (16,204 in chips)
+Seat 1: aaaa1111 (135,535 in chips)
+dddd4444: posts the ante 180
+Hero: posts the ante 180
+eeee5555: posts the ante 180
+gggg7777: posts the ante 180
+ffff6666: posts the ante 180
+aaaa1111: posts the ante 180
+bbbb2222: posts the ante 180
+dddd4444: posts small blind 600
+Hero: posts big blind 1,200
+*** HOLE CARDS ***
+Dealt to Hero [Qh 4h]
+eeee5555: folds
+gggg7777: folds
+ffff6666: raises 1,440 to 2,640
+aaaa1111: folds
+bbbb2222: folds
+dddd4444: folds
+Hero: calls 1,440
+*** FLOP *** [Ks Kd 4d]
+Hero: checks
+ffff6666: bets 2,214
+Hero: raises 11,170 to 13,384 and is all-in
+ffff6666: calls 11,170
+Hero: shows [Qh 4h] (Pair of Kings and Pair of Fours)
+ffff6666: shows [Qd 9d] (Pair of Kings)
+*** TURN *** [Ks Kd 4d] [Kc]
+*** RIVER *** [Ks Kd 4d Kc] [Kh]
+*** SHOWDOWN ***
+Hero collected 16,954 from pot
+ffff6666 collected 16,954 from pot
+*** SUMMARY ***
+Total pot 33,908
+Board [Ks Kd 4d Kc Kh]
+Seat 8: ffff6666 showed [Qd 9d] and won (16,954) with Four Kings
+Seat 5: Hero(big blind) showed [Qh 4h] and won (16,954) with Four Kings
+"""
+
+
+def _net(result: dict) -> dict[str, Decimal]:
+    return {
+        p["player_username"]: Decimal(p["ending_stack"]) - Decimal(p["starting_stack"])
+        for p in result["players"]
+    }
+
+
+class TestGGTournamentFormat:
+    def test_blinds_parsed_from_level(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_TOURNAMENT_HAND)
+        assert Decimal(result["stakes_sb"]) == Decimal("600")
+        assert Decimal(result["stakes_bb"]) == Decimal("1200")
+
+    def test_ante_taken_from_post_ante_lines(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_TOURNAMENT_HAND)
+        assert result["stakes_ante"] is not None
+        assert Decimal(result["stakes_ante"]) == Decimal("180")
+
+    def test_ante_posts_recorded_as_actions(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_TOURNAMENT_HAND)
+        antes = [a for a in result["actions"] if a["action_type"] == "POST_ANTE"]
+        assert len(antes) == 4
+
+
+class TestTournamentContext:
+    def test_tournament_id_name_and_level(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_TOURNAMENT_HAND)
+        assert result["tournament_external_id"] == "1000001"
+        assert result["tournament_name"] == "Test GTD"
+        assert result["blind_level_index"] == 14
+
+    def test_name_keeps_symbols_and_drops_game(self, parser: HandHistoryParser) -> None:
+        block = _GG_TOURNAMENT_HAND.replace(
+            "Tournament #1000001, Test GTD NLH", "Tournament #3317780, 200K GTD \u2660 FROZEN THRONE HR \u2660 RE NLH"
+        )
+        result = parser.parse(block)
+        assert result["tournament_external_id"] == "3317780"
+        assert result["tournament_name"] == "200K GTD \u2660 FROZEN THRONE HR \u2660 RE"
+
+    def test_cash_hand_has_no_tournament(
+        self, parser: HandHistoryParser, hand_blocks: list[str]
+    ) -> None:
+        result = parser.parse(hand_blocks[0])
+        assert result["tournament_external_id"] is None
+        assert result["tournament_name"] is None
+        assert result["blind_level_index"] is None
+
+
+class TestGGNetworkHeader:
+    """GGPoker network exports (e.g. WSOP Online): ante inside the level parens."""
+
+    _HEADER = (
+        'Poker Hand #TM6486474282: Tournament #317190959, $100 Sunday "Ocean KO" '
+        "Hold'em No Limit - Level5(125/250(35)) - 2026/10/04 22:28:11"
+    )
+
+    def test_level_with_ante_in_parens(self, parser: HandHistoryParser) -> None:
+        block = _GG_TOURNAMENT_HAND.replace(_GG_TOURNAMENT_HAND.splitlines()[0], self._HEADER)
+        result = parser.parse(block)
+        assert result["external_id"] == "TM6486474282"
+        assert Decimal(result["stakes_sb"]) == Decimal("125")
+        assert Decimal(result["stakes_bb"]) == Decimal("250")
+        assert result["blind_level_index"] == 5
+        assert result["tournament_external_id"] == "317190959"
+        assert result["tournament_name"] == '$100 Sunday "Ocean KO"'
+        assert result["game_type"] == "NLH"
+
+
+class TestActionLines:
+    """An action line must never swallow the start of the next line."""
+
+    _BLOCK = (
+        "Poker Hand #tour_900000003: Tournament #1, T NLH No Limit - Level2(60/120)"
+        " - 2026/04/04 19:51:17\n"
+        "Table '' 9-max Seat #2 is the button\n"
+        "Seat 1: 2d571e95 (9,646 in chips)\n"
+        "Seat 2: 4b3c4309 (9,756 in chips)\n"
+        "Seat 6: 52f8aaf3 (7,825 in chips)\n"
+        "Seat 9: Hero (9,970 in chips)\n"
+        "52f8aaf3: posts small blind 60\n"
+        "4b3c4309: posts big blind 120\n"
+        "*** HOLE CARDS ***\n"
+        "Hero: folds\n"
+        "2d571e95: folds\n"
+        "52f8aaf3: raises 450 to 570\n"
+        "4b3c4309: calls 450\n"
+        "*** FLOP *** [Kh 7c Qd]\n"
+        "52f8aaf3: checks\n"
+        "4b3c4309: bets 1,159\n"
+        "52f8aaf3: folds\n"
+        "Uncalled bet (1,159) returned to 4b3c4309\n"
+        "*** SHOWDOWN ***\n"
+        "4b3c4309 collected 1,200 from pot\n"
+        "*** SUMMARY ***\n"
+        "Total pot 1,200\n"
+    )
+
+    def test_line_after_fold_or_check_kept_when_name_starts_with_digit(
+        self, parser: HandHistoryParser
+    ) -> None:
+        result = parser.parse(self._BLOCK)
+        got = [
+            (a["player_username"], a["action_type"])
+            for a in result["actions"]
+            if a["street"] in ("PREFLOP", "FLOP") and not a["action_type"].startswith("POST")
+        ]
+        assert got == [
+            ("Hero", "FOLD"),
+            ("2d571e95", "FOLD"),
+            ("52f8aaf3", "RAISE"),
+            ("4b3c4309", "CALL"),
+            ("52f8aaf3", "CHECK"),
+            ("4b3c4309", "BET"),
+            ("52f8aaf3", "FOLD"),
+        ]
+
+    def test_raise_to_without_increment(self, parser: HandHistoryParser) -> None:
+        # GGPoker writes a tiny all-in "raise" as "raises to 21 and is all-in".
+        block = self._BLOCK.replace("4b3c4309: bets 1,159\n", "4b3c4309: raises to 21 and is all-in\n")
+        raise_ = next(
+            a for a in parser.parse(block)["actions"]
+            if a["street"] == "FLOP" and a["player_username"] == "4b3c4309"
+        )
+        assert raise_["action_type"] == "RAISE"
+        assert raise_["amount"] == "21"
+        assert raise_["is_all_in"] is True
+
+    def test_fold_and_check_have_no_amount(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(self._BLOCK)
+        for a in result["actions"]:
+            if a["action_type"] in ("FOLD", "CHECK"):
+                assert a["amount"] is None, a
+
+
+class TestNetResult:
+    def test_uncalled_bet_returned(self, parser: HandHistoryParser) -> None:
+        net = _net(parser.parse(_GG_TOURNAMENT_HAND))
+        assert net == {
+            "aaaa1111": Decimal("-180"),
+            "bbbb2222": Decimal("2340"),  # 3,720 won - (180 + 2,640 - 1,440)
+            "cccc3333": Decimal("-780"),
+            "Hero": Decimal("-1380"),
+        }
+
+    def test_split_pot_all_in(self, parser: HandHistoryParser) -> None:
+        net = _net(parser.parse(_GG_SPLIT_POT_HAND))
+        assert net["Hero"] == Decimal("750")
+        assert net["ffff6666"] == Decimal("750")
+        assert net["dddd4444"] == Decimal("-780")
+        assert net["aaaa1111"] == Decimal("-180")
+
+    def test_results_sum_to_zero_without_rake(self, parser: HandHistoryParser) -> None:
+        for hand in (_GG_TOURNAMENT_HAND, _GG_SPLIT_POT_HAND):
+            assert sum(_net(parser.parse(hand)).values()) == 0
+
+    def test_all_in_player_ends_with_winnings_only(self, parser: HandHistoryParser) -> None:
+        result = parser.parse(_GG_SPLIT_POT_HAND)
+        hero = next(p for p in result["players"] if p["player_username"] == "Hero")
+        assert Decimal(hero["ending_stack"]) == Decimal("16954")
+
+    def test_unreconciled_hand_leaves_result_unknown(
+        self, parser: HandHistoryParser, hand_blocks: list[str]
+    ) -> None:
+        # Fixture hand 1 is hand-written and doesn't add up: $25 goes in,
+        # $15.20 is collected + $0.80 rake.  Never guess a result.
+        result = parser.parse(hand_blocks[0])
+        assert all(p.get("ending_stack") is None for p in result["players"])
+
+    def test_reconciled_cash_hand_sums_to_minus_rake(self, parser: HandHistoryParser) -> None:
+        block = (
+            "ClubGG Hand #98765099: Hold'em No Limit ($0.50/$1.00) - 2024-01-15 22:31:07 UTC\n"
+            "Table 'T' 6-max Seat #1 is the button\n"
+            "Seat 1: Alice ($100.00 in chips)\n"
+            "Seat 2: Bob ($100.00 in chips)\n"
+            "Alice: posts small blind $0.50\n"
+            "Bob: posts big blind $1.00\n"
+            "*** HOLE CARDS ***\n"
+            "Alice: raises $2.00 to $3.00\n"
+            "Bob: calls $2.00\n"
+            "*** FLOP *** [Ah Kd 2c]\n"
+            "Bob: checks\n"
+            "Alice: bets $4.00\n"
+            "Bob: folds\n"
+            "Uncalled bet ($4.00) returned to Alice\n"
+            "*** SUMMARY ***\n"
+            "Total pot $6.00 | Rake $0.30\n"
+            "Seat 1: Alice collected $5.70 from main pot\n"
+        )
+        net = _net(parser.parse(block))
+        assert net == {"Alice": Decimal("2.70"), "Bob": Decimal("-3.00")}
+
+
 # ── Invalid input ─────────────────────────────────────────────────────────────
 
 

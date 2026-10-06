@@ -635,6 +635,96 @@ html, body {
   gap: var(--sp-3);
 }
 
+/* ── Results Tab ── */
+.results-summary {
+  display: flex;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+
+.res-stat { display: flex; flex-direction: column; gap: 2px; }
+.res-stat-val { font-size: 22px; font-weight: 600; color: var(--text-primary); }
+.res-stat-lbl { font-size: var(--text-xs); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.res-pos { color: var(--green); }
+.res-neg { color: var(--red); }
+.res-neutral { color: var(--text-secondary); }
+
+.results-block {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: var(--sp-4);
+  margin-top: var(--sp-4);
+}
+
+.results-block-title {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-3);
+}
+
+.results-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.results-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.results-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-dim); color: var(--text-primary); }
+.results-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.results-note { margin-top: var(--sp-3); font-size: var(--text-xs); color: var(--text-muted); line-height: 1.5; }
+
+.res-chart { position: relative; }
+.res-chart svg { width: 100%; height: 220px; display: block; }
+.res-line { fill: none; stroke: var(--accent); stroke-width: 2px; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.res-zero { stroke: var(--border); stroke-width: 1px; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.res-cross { stroke: var(--text-muted); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.res-dot { fill: var(--accent); stroke: var(--bg-elevated); stroke-width: 2px; }
+.res-hit { fill: transparent; cursor: crosshair; }
+.res-axis {
+  position: absolute;
+  left: 0;
+  width: 42px;
+  transform: translateY(-50%);
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.res-tip {
+  position: absolute;
+  top: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Per-hand findings section, below the stat-based leak cards */
+.hand-findings-header {
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.finding-evidence {
+  margin: 0;
+  padding-left: var(--sp-4);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
 /* Leak Card */
 .leak-card {
   background: var(--bg-card);
@@ -12007,3 +12097,249 @@ body.lp-mode .sp-nav { display: none; }
 .ar-table .rs-pot--flash {
   animation: potPulse 0.25s ease;
 }
+
+/* ============================================================
+   TOURNAMENT REVIEW MODE
+   ============================================================ */
+
+/* ── Filter bar ─────────────────────────────────────────────── */
+.rv-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.rv-pill {
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.65);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.rv-pill:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.rv-pill--active { background: rgba(99,133,255,0.22); color: #a8bfff; border-color: rgba(99,133,255,0.45); }
+
+/* ── Tournament list ────────────────────────────────────────── */
+.rv-list-wrap { padding: 20px 16px; }
+.rv-list-title { font-size: 1.1rem; font-weight: 600; margin: 0 0 16px; color: #e2e8f0; }
+.rv-list { display: flex; flex-direction: column; gap: 8px; }
+.rv-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.rv-row:hover { background: rgba(255,255,255,0.07); }
+.rv-row-left { display: flex; flex-direction: column; gap: 3px; }
+.rv-row-table { font-size: 0.95rem; font-weight: 500; color: #e2e8f0; }
+.rv-row-meta { font-size: 0.78rem; color: rgba(255,255,255,0.45); }
+.rv-row-right { display: flex; align-items: center; gap: 10px; }
+.rv-net { font-size: 0.85rem; font-weight: 600; min-width: 52px; text-align: right; }
+.rv-net--pos { color: #68d391; }
+.rv-net--neg { color: #fc8181; }
+
+/* ── Hand counter in rs-nav ─────────────────────────────────── */
+.rs-nav-counter {
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.55);
+  min-width: 48px;
+  text-align: center;
+}
+
+/* ── Severity badges in coaching reveal ─────────────────────── */
+.rv-sev-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.rv-sev--good    { background: rgba(72,187,120,0.2); color: #68d391; border: 1px solid rgba(72,187,120,0.35); }
+.rv-sev--minor   { background: rgba(237,137,54,0.2); color: #f6ad55; border: 1px solid rgba(237,137,54,0.35); }
+.rv-sev--major   { background: rgba(245,101,101,0.2); color: #fc8181; border: 1px solid rgba(245,101,101,0.35); }
+.rv-sev--neutral { background: rgba(160,174,192,0.15); color: #a0aec0; border: 1px solid rgba(160,174,192,0.25); }
+
+/* ── Reveal nav buttons ─────────────────────────────────────── */
+.rs-reveal-btns {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Review btn on tournament row ───────────────────────────── */
+.rv-review-btn { font-size: 0.8rem; padding: 6px 14px; }
+
+/* ── Confidence badges ──────────────────────────────────────────── */
+.rv-conf-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.rv-conf--inf  { background: rgba(99,133,255,0.15); color: #a8bfff; border: 1px solid rgba(99,133,255,0.3); }
+.rv-conf--spec { background: rgba(237,137,54,0.15); color: #f6ad55; border: 1px solid rgba(237,137,54,0.3); }
+
+/* ── Speculative disclaimer ─────────────────────────────────────── */
+.rv-spec-note {
+  font-size: 0.75rem;
+  color: #f6ad55;
+  background: rgba(237,137,54,0.1);
+  border: 1px solid rgba(237,137,54,0.25);
+  border-radius: 4px;
+  padding: 5px 10px;
+  margin-bottom: 8px;
+}
+
+/* ── Key factors chips ──────────────────────────────────────────── */
+.rv-factors { display: flex; flex-wrap: wrap; gap: 4px; }
+.rv-factor {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  color: rgba(255,255,255,0.7);
+}
+
+/* ── Recommended action — highlighted ───────────────────────────── */
+.rv-recommended { font-weight: 600; color: #e2e8f0; }
+
+/* ── Backing label ──────────────────────────────────────────────── */
+.rv-backing {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.35);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.rv-backing-val { font-style: italic; color: rgba(255,255,255,0.5); }
+
+.rv-range-note {
+  font-size: 0.68rem;
+  color: rgba(255,255,255,0.3);
+  font-style: italic;
+  margin-top: 4px;
+  margin-left: 2px;
+}
+
+/* ── Known Limitations section ──────────────────────────────────── */
+.rv-limitations {
+  margin-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-top: 10px;
+}
+.rv-limitations-toggle {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.35);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.rv-limitations-toggle::before { content: '▸ '; }
+details[open] .rv-limitations-toggle::before { content: '▾ '; }
+.rv-limitations-list {
+  margin: 6px 0 0 14px;
+  padding: 0;
+  font-size: 0.70rem;
+  color: rgba(255,255,255,0.28);
+  line-height: 1.6;
+}
+
+/* ── Range position badge ───────────────────────────────────────── */
+.rv-rpos-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  display: inline-block;
+}
+.rv-rpos--top     { background: rgba(72,187,120,0.15); color: #68d391; border: 1px solid rgba(72,187,120,0.3); }
+.rv-rpos--mid     { background: rgba(99,179,237,0.12); color: #76c3f0; border: 1px solid rgba(99,179,237,0.25); }
+.rv-rpos--bottom  { background: rgba(246,173,85,0.12); color: #f6ad55; border: 1px solid rgba(246,173,85,0.25); }
+.rv-rpos--outside { background: rgba(245,101,101,0.12); color: #fc8181; border: 1px solid rgba(245,101,101,0.25); }
+
+/* ── Practical adjustment card ──────────────────────────────── */
+.rv-exploit {
+  border-left: 2px solid rgba(255, 180, 0, 0.4);
+  padding: 6px 0 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rv-exploit-header {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 180, 0, 0.6);
+}
+.rv-exploit-villain {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255, 180, 0, 0.95);
+}
+.rv-exploit-stats {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: -2px;
+}
+.rv-exploit-bullets {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+.rv-exploit-bullet {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  gap: 6px;
+}
+.rv-exploit-bullet::before {
+  content: '→';
+  color: rgba(255, 180, 0, 0.65);
+  flex-shrink: 0;
+}
+.rv-exploit-no-data {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+}
+.rv-exploit-conf {
+  font-size: 0.62rem;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.rv-exploit-conf--low    { background: rgba(255, 180, 0, 0.10); color: rgba(255, 180, 0, 0.50); }
+.rv-exploit-conf--medium { background: rgba(255, 180, 0, 0.18); color: rgba(255, 180, 0, 0.70); }
+.rv-exploit-conf--high   { background: rgba(255, 180, 0, 0.28); color: rgba(255, 180, 0, 0.95); }
+
+/* Real-spot drills */
+.trainer-real-btn { margin-top: var(--sp-3); }
+.trainer-real-desc { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-2); }
+.feedback-real { margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); }
+.trainer-practice-link { font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--sp-3); }
+.trainer-practice-link a { color: var(--accent); }
+/* Play progress (Progress tab) */
+.prog-play { margin-bottom: var(--sp-6); }
+.prog-th-sub { font-size: 10px; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
+.prog-ci { font-size: 10px; color: var(--text-muted); white-space: nowrap; }

@@ -33,13 +33,15 @@ wide to avoid false positives on legitimate style variation.
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.features.player_stats import PlayerStats
+    from app.features.player_stats import HandRecord, PlayerStats
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -172,6 +174,65 @@ def _compute_priority(severity: Severity, confidence: Confidence) -> int:
     return max(1, min(10, raw + bonus))
 
 
+# ── Baselines ─────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Baselines:
+    """
+    Game-format-dependent thresholds for the blind-defence rules.
+
+    Antes raise the blinds' pot odds: with a ~0.125–0.15bb ante per player at
+    8-max, BB vs a 2–2.2x steal needs much less equity to continue, so correct
+    BB defence is far wider than in cash games, and the SB plays closer to
+    3-bet-or-fold.  Other rules still use the cash baselines in their code.
+
+    Ranges are approximate solver-informed bands, deliberately wide to avoid
+    false positives; they are not exact solver outputs.
+    """
+
+    name: str
+    bb_fold_to_steal_max: Decimal  # above → BB over-folding vs steals
+    bb_fold_to_steal_high: Decimal  # above → HIGH severity
+    bb_fold_to_steal_min: Decimal  # below → BB defending too loose
+    bb_fold_to_steal_range: str
+    bb_continue_range: str  # suggested BB continue frequency vs steals
+    bb_fold_to_btn_max: Decimal
+    bb_fold_to_btn_high: Decimal
+    bb_fold_to_btn_range: str
+    sb_fold_to_steal_max: Decimal
+    sb_fold_to_steal_range: str
+
+
+CASH_BASELINES = Baselines(
+    name="cash (no antes)",
+    bb_fold_to_steal_max=Decimal("0.68"),
+    bb_fold_to_steal_high=Decimal("0.80"),
+    bb_fold_to_steal_min=Decimal("0.38"),
+    bb_fold_to_steal_range="45–65%",
+    bb_continue_range="35–55%",
+    bb_fold_to_btn_max=Decimal("0.72"),
+    bb_fold_to_btn_high=Decimal("0.82"),
+    bb_fold_to_btn_range="38–60%",
+    sb_fold_to_steal_max=Decimal("0.72"),
+    sb_fold_to_steal_range="50–72%",
+)
+
+MTT_ANTE_BASELINES = Baselines(
+    name="tournament with antes",
+    bb_fold_to_steal_max=Decimal("0.55"),
+    bb_fold_to_steal_high=Decimal("0.70"),
+    bb_fold_to_steal_min=Decimal("0.20"),
+    bb_fold_to_steal_range="25–55%",
+    bb_continue_range="45–75%",
+    bb_fold_to_btn_max=Decimal("0.50"),
+    bb_fold_to_btn_high=Decimal("0.65"),
+    bb_fold_to_btn_range="25–50%",
+    sb_fold_to_steal_max=Decimal("0.80"),
+    sb_fold_to_steal_range="60–80%",
+)
+
+
 # ── LeakDetector ──────────────────────────────────────────────────────────────
 
 
@@ -181,10 +242,17 @@ class LeakDetector:
 
     Usage::
 
-        detector = LeakDetector()
+        detector = LeakDetector()  # cash baselines
+        detector = LeakDetector(MTT_ANTE_BASELINES)  # tournament hands
         leaks = detector.detect(stats)
         # leaks is sorted by priority descending (most urgent first)
+
+    Prefer ``analyze_leaks()``, which also picks baselines and filters
+    short-stack hands.
     """
+
+    def __init__(self, baselines: Baselines = CASH_BASELINES) -> None:
+        self.baselines = baselines
 
     def detect(self, stats: PlayerStats) -> list[Leak]:
         """Return all detected leaks, sorted by priority (highest first)."""
@@ -595,10 +663,11 @@ class LeakDetector:
         conf = _confidence(n, _DEFEND_N)
         if conf is Confidence.INSUFFICIENT or value is None:
             return None
-        if value <= Decimal("0.68"):
+        b = self.baselines
+        if value <= b.bb_fold_to_steal_max:
             return None
 
-        severity = Severity.HIGH if value > Decimal("0.80") else Severity.MEDIUM
+        severity = Severity.HIGH if value > b.bb_fold_to_steal_high else Severity.MEDIUM
         return Leak(
             leak_id="bb_overfolding_vs_steals",
             category=Category.PREFLOP,
@@ -610,7 +679,8 @@ class LeakDetector:
                 "immediately in excess of break-even frequency."
             ),
             evidence=(
-                f"BB fold-to-steal={_pct(value)} over {n} BB-vs-steal situations (baseline: 45–65%)"
+                f"BB fold-to-steal={_pct(value)} over {n} BB-vs-steal situations "
+                f"(baseline, {b.name}: {b.bb_fold_to_steal_range})"
             ),
             confidence=conf,
             severity=severity,
@@ -624,7 +694,7 @@ class LeakDetector:
             ),
             suggested_fix=(
                 "Widen BB defend range.  At typical steal frequencies you need "
-                "to continue ~35–55% to prevent profitable exploitation.  "
+                f"to continue ~{b.bb_continue_range} to prevent profitable exploitation.  "
                 "Prioritise suited hands, pairs, and suited connectors."
             ),
         )
@@ -635,10 +705,11 @@ class LeakDetector:
         conf = _confidence(n, _DEFEND_N)
         if conf is Confidence.INSUFFICIENT or value is None:
             return None
-        if value <= Decimal("0.72"):
+        b = self.baselines
+        if value <= b.bb_fold_to_btn_max:
             return None
 
-        severity = Severity.HIGH if value > Decimal("0.82") else Severity.MEDIUM
+        severity = Severity.HIGH if value > b.bb_fold_to_btn_high else Severity.MEDIUM
         return Leak(
             leak_id="bb_overfolding_vs_btn",
             category=Category.PREFLOP,
@@ -650,7 +721,8 @@ class LeakDetector:
                 "This is one of the highest-value exploits in 6-max poker."
             ),
             evidence=(
-                f"BB fold-to-BTN={_pct(value)} over {n} BB-vs-BTN situations (baseline: 38–60%)"
+                f"BB fold-to-BTN={_pct(value)} over {n} BB-vs-BTN situations "
+                f"(baseline, {b.name}: {b.bb_fold_to_btn_range})"
             ),
             confidence=conf,
             severity=severity,
@@ -674,7 +746,8 @@ class LeakDetector:
         conf = _confidence(n, _DEFEND_N)
         if conf is Confidence.INSUFFICIENT or value is None:
             return None
-        if value <= Decimal("0.72"):
+        b = self.baselines
+        if value <= b.sb_fold_to_steal_max:
             return None
 
         return Leak(
@@ -683,12 +756,13 @@ class LeakDetector:
             title="SB over-folding to steals",
             explanation=(
                 f"Folding {_pct(value)} of SB opportunities when facing a steal "
-                "is above the 50–72% baseline.  Although SB acts first postflop "
-                "(a real disadvantage), the pot odds and positional play vs. only "
-                "the opener justify wider defence."
+                f"is above the {b.sb_fold_to_steal_range} baseline.  Although SB acts "
+                "first postflop (a real disadvantage), the pot odds and positional "
+                "play vs. only the opener justify wider defence."
             ),
             evidence=(
-                f"SB fold-to-steal={_pct(value)} over {n} SB-vs-steal situations (baseline: 50–72%)"
+                f"SB fold-to-steal={_pct(value)} over {n} SB-vs-steal situations "
+                f"(baseline, {b.name}: {b.sb_fold_to_steal_range})"
             ),
             confidence=conf,
             severity=Severity.MEDIUM,
@@ -713,7 +787,8 @@ class LeakDetector:
         conf = _confidence(n, _DEFEND_N)
         if conf is Confidence.INSUFFICIENT or value is None:
             return None
-        if value >= Decimal("0.38"):
+        b = self.baselines
+        if value >= b.bb_fold_to_steal_min:
             return None
 
         return Leak(
@@ -726,7 +801,8 @@ class LeakDetector:
                 "frequently includes dominated hands that leak chips postflop."
             ),
             evidence=(
-                f"BB fold-to-steal={_pct(value)} over {n} BB-vs-steal situations (baseline: 45–65%)"
+                f"BB fold-to-steal={_pct(value)} over {n} BB-vs-steal situations "
+                f"(baseline, {b.name}: {b.bb_fold_to_steal_range})"
             ),
             confidence=conf,
             severity=Severity.LOW,
@@ -1306,3 +1382,63 @@ def analysis_note(hand_count: int, leak_count: int) -> str:
             "detected in the current sample."
         )
     return f"{hand_count} hands analysed.  {leak_count} leak(s) detected."
+
+
+# ── Tournament-aware entry point ──────────────────────────────────────────────
+
+# Below this effective depth, preflop play is push/fold and frequency stats
+# (VPIP, 3-bet%, WTSD...) stop meaning what the baselines assume.  Those hands
+# are judged per hand against push/fold ranges (app.analysis), not here.
+MIN_EFFECTIVE_BB = Decimal("20")
+
+
+@dataclass(frozen=True)
+class LeakAnalysis:
+    stats: PlayerStats  # computed on the leak sample (short stacks excluded)
+    leaks: list[Leak]
+    baselines: Baselines
+    total_hands: int
+    short_stack_excluded: int
+    note: str
+
+
+def analyze_leaks(player_id: uuid.UUID, records: Sequence[HandRecord]) -> LeakAnalysis:
+    """
+    Run stat-based leak detection with format-appropriate baselines.
+
+    - Hands with effective stack < MIN_EFFECTIVE_BB are excluded.  Hands with
+      unknown depth are kept: they can't be classified as push/fold.
+    - Tournament baselines are used when most hands had antes.
+    """
+    from app.features.player_stats import compute_player_stats
+
+    sample = [
+        r
+        for r in records
+        if r.effective_stack_bb is None or r.effective_stack_bb >= MIN_EFFECTIVE_BB
+    ]
+    excluded = len(records) - len(sample)
+    ante_hands = sum(1 for r in records if r.has_ante)
+    baselines = (
+        MTT_ANTE_BASELINES if records and ante_hands * 2 > len(records) else CASH_BASELINES
+    )
+
+    stats = compute_player_stats(player_id=player_id, hands=sample)
+    leaks = LeakDetector(baselines).detect(stats)
+
+    note = analysis_note(stats.hand_count, len(leaks))
+    if excluded:
+        note += (
+            f"  {excluded} hand(s) under {MIN_EFFECTIVE_BB}bb effective excluded "
+            "(push/fold spots)."
+        )
+    note += f"  Baselines: {baselines.name}."
+
+    return LeakAnalysis(
+        stats=stats,
+        leaks=leaks,
+        baselines=baselines,
+        total_hands=len(records),
+        short_stack_excluded=excluded,
+        note=note,
+    )

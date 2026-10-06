@@ -29,12 +29,12 @@ class TestClubGGApiIngestor:
 
     def test_api_key_from_settings_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CLUBGG_API_KEY", "env-key")
-        # Reload config to pick up monkeypatched env
-        from importlib import reload
-        import app.config as cfg_module
-        reload(cfg_module)
-        from app.config import settings
-        assert settings.CLUBGG_API_KEY == "env-key"
+        # Build a fresh Settings rather than reloading app.config: a reload
+        # replaces the module-level `settings` and leaves other modules
+        # holding the stale instance, which breaks later monkeypatching.
+        from app.config import Settings
+
+        assert Settings().CLUBGG_API_KEY == "env-key"
 
     @pytest.mark.asyncio
     async def test_fetch_hands_empty(self) -> None:

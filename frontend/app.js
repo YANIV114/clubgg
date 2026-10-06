@@ -11,6 +11,10 @@ const API = '/api/v1';
 let currentPlayerId = null;
 let statsData = null;
 let leaksData = null;
+let leakReportData = null;  // per-hand findings; null if unavailable
+let resultsData = null;     // chip results by position / depth; null if unavailable
+let tournamentsData = null; // per-tournament summaries + phases; null if unavailable
+let progressData = null;    // play frequencies per month; null if unavailable
 let planData = null;
 let sampleData = null;
 let activeTab = 'home';
@@ -485,8 +489,10 @@ const els = {
   homePanel:      () => document.getElementById('panel-home'),
   statsPanel:     () => document.getElementById('panel-stats'),
   leaksPanel:     () => document.getElementById('panel-leaks'),
+  resultsPanel:   () => document.getElementById('panel-results'),
   planPanel:      () => document.getElementById('panel-plan'),
   trainerPanel:   () => document.getElementById('panel-trainer'),
+  reviewPanel:    () => document.getElementById('panel-review'),
 };
 
 /* ============================================================
@@ -523,6 +529,10 @@ async function loadPlayer(id) {
   currentPlayerId = id;
   statsData = null;
   leaksData = null;
+  leakReportData = null;
+  resultsData = null;
+  tournamentsData = null;
+  progressData = null;
   planData = null;
   sampleData = null;
   leakFilter = 'all';
@@ -533,10 +543,16 @@ async function loadPlayer(id) {
   showLoadingInPanels();
 
   try {
-    [statsData, leaksData, sampleData] = await Promise.all([
+    [statsData, leaksData, sampleData, leakReportData, resultsData, tournamentsData, progressData] = await Promise.all([
       apiFetch(`/players/${encodeURIComponent(id)}/stats`),
       apiFetch(`/players/${encodeURIComponent(id)}/leaks`),
       apiFetch(`/players/${encodeURIComponent(id)}/sample`),
+      // Optional: a failure here must not block the rest of the dashboard.
+      // limit=1000 matches the /leaks default so both sections cover the same hands.
+      apiFetch(`/players/${encodeURIComponent(id)}/leak-report?limit=1000`).catch(() => null),
+      apiFetch(`/players/${encodeURIComponent(id)}/results`).catch(() => null),
+      apiFetch(`/players/${encodeURIComponent(id)}/tournaments`).catch(() => null),
+      apiFetch(`/players/${encodeURIComponent(id)}/progress`).catch(() => null),
     ]);
 
     if (activeEl) {
@@ -549,6 +565,8 @@ async function loadPlayer(id) {
     renderHome();
     renderStats(statsData);
     renderLeaks(leaksData);
+    renderResults(resultsData, tournamentsData);
+    renderProgress();
     clearPanel(els.planPanel(), renderPlanEmpty);
     trainerState = null;
     renderTrainer();
@@ -556,6 +574,10 @@ async function loadPlayer(id) {
     currentPlayerId = null;
     statsData = null;
     leaksData = null;
+    leakReportData = null;
+    resultsData = null;
+    tournamentsData = null;
+    progressData = null;
     sampleData = null;
     if (activeEl) activeEl.innerHTML = `<span style="color:var(--red)">Load failed — ${escHtml(err.message)}</span>`;
     showErrorInPanels(err.message);
@@ -579,6 +601,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-panel').forEach(panel => {
     panel.classList.toggle('active', panel.id === `panel-${tab}`);
   });
+  if (tab === 'review') renderTournamentReview();
 }
 
 /* ============================================================
@@ -587,14 +610,14 @@ function switchTab(tab) {
 
 function showLoadingInPanels() {
   const spinner = `<div class="loading-state"><div class="spinner"></div>Loading player data…</div>`;
-  const panels = [els.statsPanel(), els.leaksPanel(), els.planPanel()];
+  const panels = [els.statsPanel(), els.leaksPanel(), els.resultsPanel(), els.planPanel()];
   panels.forEach(p => { if (p) p.innerHTML = spinner; });
   // Trainer panel shows its own empty state during load; do not clobber with spinner
 }
 
 function showErrorInPanels(msg) {
   const card = errorCard(msg);
-  const panels = [els.statsPanel(), els.leaksPanel(), els.planPanel()];
+  const panels = [els.statsPanel(), els.leaksPanel(), els.resultsPanel(), els.planPanel()];
   panels.forEach(p => { if (p) p.innerHTML = card; });
 }
 
@@ -1237,6 +1260,8 @@ function renderLeaks(data) {
     html += `</div>`;
   }
 
+  html += _renderHandFindings(leakReportData);
+
   panel.innerHTML = html;
 
   // Bind filter pills
@@ -1312,6 +1337,74 @@ function renderLeakCard(leak) {
   </div>`;
 }
 
+/* Per-hand findings (from /leak-report): decision patterns across individual
+   hands, e.g. push/fold and calling shoves.  Complements the stat-based cards. */
+
+// Report severities map onto the existing severity badge colours.
+const _FINDING_SEV_CLS = { critical: 'high', major: 'medium', minor: 'low' };
+
+function _renderHandFindings(report) {
+  if (!report) return '';
+  const findings = report.leaks || [];
+
+  let html = `<div class="leaks-summary hand-findings-header">
+    Hand-by-hand findings — <span class="text-secondary">${escHtml(report.summary || '')}</span>
+  </div>`;
+
+  if (findings.length === 0) return html;
+
+  html += `<div class="leaks-list">`;
+  for (const f of findings) {
+    const sevCls  = _FINDING_SEV_CLS[f.severity] || 'low';
+    const confCls = f.confidence || 'low';
+    const freq    = f.frequency != null ? `${(f.frequency * 100).toFixed(1)}% of spots` : '';
+    const evidence = (f.evidence || [])
+      .map(e => `<li>${escHtml(e)}</li>`)
+      .join('');
+    html += `<div class="leak-card">
+      <div class="leak-card-bar sev-${sevCls}"></div>
+      <div class="leak-card-body">
+        <div class="leak-card-header">
+          <span class="severity-badge ${sevCls}">${escHtml((f.severity || '').toUpperCase())}</span>
+          <span class="category-pill">${escHtml(f.category || '')}</span>
+          <span class="leak-id-text">${escHtml(f.leak_id || '')}</span>
+        </div>
+        <div class="leak-card-title">${escHtml(f.title || '')}</div>
+        <div class="leak-evidence">${escHtml(f.description || '')}</div>
+        <div class="leak-collapsibles">
+          <div>
+            <button class="collapsible-trigger">
+              <span class="chevron">▶</span>&nbsp;Hands
+            </button>
+            <div class="collapsible-body"><ul class="finding-evidence">${evidence}</ul></div>
+          </div>
+          <div>
+            <button class="collapsible-trigger">
+              <span class="chevron">▶</span>&nbsp;Suggested Fix
+            </button>
+            <div class="collapsible-body">${escHtml(f.suggested_fix || '')}</div>
+          </div>
+          <div>
+            <button class="collapsible-trigger">
+              <span class="chevron">▶</span>&nbsp;Limitations
+            </button>
+            <div class="collapsible-body">${escHtml(f.limitations || '')}</div>
+          </div>
+        </div>
+        <div class="leak-card-footer">
+          <span class="confidence-badge ${confCls}" title="Confidence level">
+            ${escHtml(confCls.toUpperCase())} CONFIDENCE
+          </span>
+          <span class="sample-size-text">n=${f.sample_size ?? '?'}</span>
+          <span class="frequency-text">${escHtml(freq)}</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
 function _renderLeakExamples(leak) {
   const exs = leak.examples || [];
   if (!exs.length) return '';
@@ -1337,6 +1430,230 @@ function _renderLeakExamples(leak) {
     <div class="leak-examples-title">Hand examples (${exs.length})</div>
     ${rows}
   </div>`;
+}
+
+/* ============================================================
+   RESULTS TAB
+   Chip results by position and stack depth.  Every bb/100 shows its 95%
+   margin; a result is coloured only when the margin excludes zero.
+   ============================================================ */
+
+function _fmtBb(v, digits = 1) {
+  if (v == null) return '—';
+  const s = parseFloat(v).toFixed(digits);
+  const n = parseFloat(s);
+  if (n === 0) return (0).toFixed(digits);  // never "-0"
+  return `${n > 0 ? '+' : ''}${s}`;
+}
+
+function _resultCls(rate) {
+  if (!rate || rate.value == null || !rate.significant) return 'res-neutral';
+  return parseFloat(rate.value) >= 0 ? 'res-pos' : 'res-neg';
+}
+
+function _resultReading(rate) {
+  if (!rate || rate.value == null) return 'no data';
+  if (!rate.significant) return 'not established';
+  return parseFloat(rate.value) >= 0 ? 'winning' : 'losing';
+}
+
+function _renderResultTable(title, firstCol, rows) {
+  if (!rows || !rows.length) return '';
+  const body = rows.map(r => {
+    const b = r.bb_per_100;
+    return `<tr>
+      <td>${escHtml(r.label)}</td>
+      <td class="num">${escHtml(r.hands)}</td>
+      <td class="num">${escHtml(_fmtBb(r.total_bb, 0))}</td>
+      <td class="num ${_resultCls(b)}">${escHtml(_fmtBb(b.value))}</td>
+      <td class="num text-secondary">${b.margin != null ? '±' + escHtml(parseFloat(b.margin).toFixed(0)) : '—'}</td>
+      <td class="text-secondary">${escHtml(_resultReading(b))}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="results-block">
+    <div class="results-block-title">${escHtml(title)}</div>
+    <table class="results-table">
+      <thead><tr>
+        <th>${escHtml(firstCol)}</th><th class="num">Hands</th><th class="num">Total bb</th>
+        <th class="num">bb/100</th><th class="num">95% margin</th><th>Reading</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
+}
+
+function _renderResultCurve(curve, handCount) {
+  if (!curve || curve.length < 2) return '';
+  const W = 800, H = 220, PAD_L = 48, PAD_R = 12, PAD_T = 12, PAD_B = 24;
+  const vals = curve.map(v => parseFloat(v));
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  const span = hi - lo || 1;
+  const x = i => PAD_L + (i / (vals.length - 1)) * (W - PAD_L - PAD_R);
+  const y = v => PAD_T + (1 - (v - lo) / span) * (H - PAD_T - PAD_B);
+  const path = vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  // Axis labels are HTML, not SVG text: the SVG stretches horizontally, which
+  // would distort glyphs.  Skip the zero label when it would collide.
+  const tickVals = [hi, lo];
+  if (lo < 0 && hi > 0 && Math.min(y(0) - y(hi), y(lo) - y(0)) > 16) tickVals.push(0);
+  const ticks = tickVals.map(v =>
+    `<span class="res-axis" style="top:${((y(v) / H) * 100).toFixed(2)}%">${escHtml(_fmtBb(v, 0))}</span>`
+  ).join('');
+  return `<div class="results-block">
+    <div class="results-block-title">Cumulative result (bb) over ${escHtml(handCount)} hands</div>
+    <div class="res-chart" data-hands="${escHtml(handCount)}" data-curve="${escHtml(JSON.stringify(vals))}">
+      ${ticks}
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+           aria-label="Cumulative chip result in big blinds, ending at ${_fmtBb(vals[vals.length - 1], 0)} bb">
+        <line x1="${PAD_L}" x2="${W - PAD_R}" y1="${y(0)}" y2="${y(0)}" class="res-zero"/>
+        <path d="${path}" class="res-line"/>
+        <line class="res-cross" x1="0" x2="0" y1="${PAD_T}" y2="${H - PAD_B}" visibility="hidden"/>
+        <circle class="res-dot" r="4" visibility="hidden"/>
+        <rect class="res-hit" x="${PAD_L}" y="0" width="${W - PAD_L - PAD_R}" height="${H}"/>
+      </svg>
+      <div class="res-tip" hidden></div>
+    </div>
+  </div>`;
+}
+
+function _bindResultCurve(panel) {
+  const box = panel.querySelector('.res-chart');
+  if (!box) return;
+  const vals = JSON.parse(box.dataset.curve);
+  const hands = parseInt(box.dataset.hands, 10);
+  const svg = box.querySelector('svg');
+  const hit = box.querySelector('.res-hit');
+  const cross = box.querySelector('.res-cross');
+  const dot = box.querySelector('.res-dot');
+  const tip = box.querySelector('.res-tip');
+  const path = box.querySelector('.res-line');
+  const W = 800, PAD_L = 48, PAD_R = 12;
+
+  hit.addEventListener('mousemove', ev => {
+    const pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    const local = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const frac = Math.min(1, Math.max(0, (local.x - PAD_L) / (W - PAD_L - PAD_R)));
+    const i = Math.round(frac * (vals.length - 1));
+    // Read the y position back from the drawn path so the dot sits on the line.
+    const seg = path.getAttribute('d').split(/[ML]/).filter(Boolean)[i].split(',');
+    const cx = parseFloat(seg[0]), cy = parseFloat(seg[1]);
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx);
+    cross.setAttribute('visibility', 'visible');
+    dot.setAttribute('cx', cx); dot.setAttribute('cy', cy);
+    dot.setAttribute('visibility', 'visible');
+    const handNo = Math.max(1, Math.round((i / (vals.length - 1)) * hands));
+    tip.textContent = `Hand ~${handNo}: ${_fmtBb(vals[i], 1)} bb`;
+    tip.hidden = false;
+    const rect = box.getBoundingClientRect();
+    tip.style.left = `${Math.min(ev.clientX - rect.left + 12, rect.width - 160)}px`;
+  });
+  hit.addEventListener('mouseleave', () => {
+    cross.setAttribute('visibility', 'hidden');
+    dot.setAttribute('visibility', 'hidden');
+    tip.hidden = true;
+  });
+}
+
+function _pct1(m) {
+  return m && m.value != null ? `${(parseFloat(m.value) * 100).toFixed(0)}%` : '—';
+}
+
+function _renderPhaseTable(phases) {
+  if (!phases || !phases.length) return '';
+  const body = phases.map(p => {
+    const b = p.bb_per_100;
+    return `<tr>
+      <td>${escHtml(p.label)}</td>
+      <td class="num">${escHtml(p.hands)}</td>
+      <td class="num">${escHtml(_pct1(p.vpip))}</td>
+      <td class="num">${escHtml(_pct1(p.pfr))}</td>
+      <td class="num">${escHtml(_pct1(p.three_bet_pct))}</td>
+      <td class="num ${_resultCls(b)}">${escHtml(_fmtBb(b.value))}</td>
+      <td class="num text-secondary">${b.margin != null ? '±' + escHtml(parseFloat(b.margin).toFixed(0)) : '—'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="results-block">
+    <div class="results-block-title">By tournament phase (blind level) — how your play changes as the tournament goes on</div>
+    <table class="results-table">
+      <thead><tr>
+        <th>Phase</th><th class="num">Hands</th><th class="num">VPIP</th><th class="num">PFR</th>
+        <th class="num">3-bet</th><th class="num">bb/100</th><th class="num">95% margin</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <div class="results-note">Phases are blind-level bands, a rough proxy: level numbering differs between
+    structures. Bubble / in-the-money can't be detected — hand histories don't include players remaining or payouts.</div>
+  </div>`;
+}
+
+function _renderTournamentTable(tournaments) {
+  if (!tournaments || !tournaments.length) return '';
+  const body = tournaments.map(t => {
+    const levels = t.first_level != null
+      ? (t.first_level === t.last_level ? `${t.first_level}` : `${t.first_level}–${t.last_level}`)
+      : '—';
+    return `<tr>
+      <td>${escHtml(t.name || '#' + t.tournament_id)}</td>
+      <td class="text-secondary">${escHtml(t.format_hint || '')}</td>
+      <td class="num">${escHtml(t.hands)}</td>
+      <td class="num">${escHtml(levels)}</td>
+      <td class="num">${escHtml(t.entries)}</td>
+      <td class="num">${escHtml(_fmtBb(t.total_bb, 0))}</td>
+    </tr>`;
+  }).join('');
+  const entries = tournaments.reduce((n, t) => n + t.entries, 0);
+  return `<div class="results-block">
+    <div class="results-block-title">Tournaments — ${escHtml(tournaments.length)} tournaments, ${escHtml(entries)} entries</div>
+    <table class="results-table">
+      <thead><tr>
+        <th>Tournament</th><th>Format</th><th class="num">Hands</th><th class="num">Levels</th>
+        <th class="num">Entries</th><th class="num">Chips (bb)</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <div class="results-note">Chip results only: finishing place and prize money aren't in the hand
+    histories, and bounty winnings aren't counted. Busting out doesn't mean you didn't cash.
+    Format is guessed from the tournament name.</div>
+  </div>`;
+}
+
+function renderResults(data, tournaments) {
+  const panel = els.resultsPanel();
+  if (!panel) return;
+  if (!data) {
+    panel.innerHTML = `<div class="empty-state"><div class="empty-state-title">Results unavailable.</div></div>`;
+    return;
+  }
+  if (!data.hand_count) {
+    panel.innerHTML = `<div class="empty-state"><div class="empty-state-title">No hands with a known result yet.</div></div>`;
+    return;
+  }
+
+  const b = data.bb_per_100;
+  const missing = data.hands_without_result
+    ? ` ${data.hands_without_result} hand(s) without a reconciled result are excluded.`
+    : '';
+  let html = `<div class="results-summary">
+    <div class="res-stat"><span class="res-stat-val">${escHtml(data.hand_count)}</span><span class="res-stat-lbl">Hands</span></div>
+    <div class="res-stat"><span class="res-stat-val ${_resultCls(b)}">${escHtml(_fmtBb(data.total_bb, 0))} bb</span><span class="res-stat-lbl">Total</span></div>
+    <div class="res-stat"><span class="res-stat-val ${_resultCls(b)}">${escHtml(_fmtBb(b.value))}</span><span class="res-stat-lbl">bb/100 (±${b.margin != null ? escHtml(parseFloat(b.margin).toFixed(0)) : '—'})</span></div>
+  </div>
+  <div class="leaks-summary">
+    Chip results, not money — tournament ICM is not modelled. Results swing by tens of bb per
+    hand, so each bb/100 shows a 95% margin; only results whose margin excludes zero are
+    coloured.${escHtml(missing)}
+  </div>`;
+
+  html += _renderResultCurve(data.cumulative_bb, data.hand_count);
+  html += _renderResultTable('By position', 'Position', data.by_position);
+  html += _renderResultTable('By effective stack', 'Stack', data.by_depth);
+  if (tournaments) {
+    html += _renderPhaseTable(tournaments.phases);
+    html += _renderTournamentTable(tournaments.tournaments);
+  }
+
+  panel.innerHTML = html;
+  _bindResultCurve(panel);
 }
 
 /* ============================================================
@@ -2038,6 +2355,11 @@ function renderHand(handStr) {
   }).join('<span class="card-gap">\u2009</span>');
 }
 
+// A drill may accept more than one answer (drill.alt) where two lines are standard.
+function _isAcceptable(drill, v) {
+  return v === drill.ok || (drill.alt || []).includes(v);
+}
+
 function btnClass(v) {
   switch (v) {
     case 'fold':    return 'btn-fold';
@@ -2114,7 +2436,6 @@ function renderFaceDownCard() {
 }
 
 function renderPokerTable(drill, phase) {
-  console.log('[TRAINER] renderPokerTable (old analysis trainer)', { ctx: drill.ctx, phase });
   const ctx   = parseCtx(drill.ctx);
   const hp    = ctx.heroPos || 'BTN';
   const stack = ctx.eff || ctx.stack || '?';
@@ -2158,11 +2479,7 @@ function renderPokerTable(drill, phase) {
     return `<div class="${cls}" style="left:${c.left}%;top:${c.top}%">${inner}</div>`;
   }).join('');
 
-  const debugBar = `<div style="background:#312e81;border:1px solid #6366f1;border-radius:4px;padding:4px 8px;font-size:10px;color:#a5b4fc;font-family:monospace;margin-bottom:6px">
-    RENDERER: renderPokerTable &nbsp;|&nbsp; ctx: ${escHtml(drill.ctx || '?')} &nbsp;|&nbsp; phase: ${escHtml(phase || '?')}
-  </div>`;
-
-  return `${debugBar}<div class="poker-table-wrap">
+  return `<div class="poker-table-wrap">
     <div class="poker-table-felt">
       <div class="table-pot"><div class="table-pot-lbl">pot</div><div class="table-pot-amt">${potBb}bb</div></div>
     </div>
@@ -2383,6 +2700,56 @@ function _missedSpotsSection(state) {
    PROGRESS TAB
    ============================================================ */
 
+/* Play progress from real hands: key preflop frequencies per month with 95%
+   intervals; the latest month vs all earlier months.  Shown above the
+   training-accuracy section of the Progress tab. */
+const _VERDICT_CLS = { improved: 'res-pos', worse: 'res-neg' };
+
+function _renderPlayProgress(data) {
+  if (!data || !data.periods || !data.periods.length) return '';
+  const pct = v => (v == null ? '—' : `${(parseFloat(v) * 100).toFixed(0)}%`);
+  const periods = data.periods;
+  const cmp = Object.fromEntries((data.comparison || []).map(c => [c.key, c]));
+  const keys = periods[0].metrics.map(m => m.key);
+
+  const head = periods.map(p =>
+    `<th class="num">${escHtml(p.label)}<div class="prog-th-sub">${escHtml(p.hands)} hands</div></th>`
+  ).join('');
+  const rows = keys.map(key => {
+    const first = periods[0].metrics.find(m => m.key === key);
+    const cells = periods.map(p => {
+      const m = p.metrics.find(x => x.key === key);
+      if (!m || m.value == null) return '<td class="num text-secondary">—</td>';
+      return `<td class="num">${pct(m.value)}<div class="prog-ci">${pct(m.ci_low)}–${pct(m.ci_high)} · n=${escHtml(m.n)}</div></td>`;
+    }).join('');
+    const c = cmp[key];
+    const verdict = c
+      ? `<span class="${_VERDICT_CLS[c.verdict] || 'res-neutral'}">${escHtml(c.verdict)}</span>`
+      : '<span class="res-neutral">—</span>';
+    return `<tr>
+      <td>${escHtml(first.label)}</td>
+      ${cells}
+      <td class="num text-secondary">${pct(first.normal_low)}–${pct(first.normal_high)}</td>
+      <td>${verdict}</td>
+    </tr>`;
+  }).join('');
+
+  const latest = data.latest_label && periods.length > 1
+    ? `Latest month (${escHtml(data.latest_label)}) vs all earlier months`
+    : 'Needs at least two months of hands';
+  return `<div class="results-block prog-play">
+    <div class="results-block-title">Your play over time — from your real hands (20bb+ effective)</div>
+    <table class="results-table">
+      <thead><tr><th>Stat</th>${head}<th class="num">Normal range</th><th>${latest}</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="results-note">Each value shows a 95% range and sample size. A change is called improved or worse
+    only when it is statistically significant, judged by whether it moved toward the normal range for
+    tournaments with antes (approximate guidelines, not solver output). Small months give wide ranges —
+    import more hands to tighten them.</div>
+  </div>`;
+}
+
 function renderProgress() {
   const panel = document.getElementById('panel-progress');
   if (!panel) return;
@@ -2390,8 +2757,10 @@ function renderProgress() {
   const h = _ensureHistoryShape(loadTrainerHistory() || _emptyHistory());
   const sessions = h.sessions;
 
+  const playHtml = _renderPlayProgress(progressData);
+
   if (sessions.length === 0) {
-    panel.innerHTML = `<div class="empty-state">
+    panel.innerHTML = playHtml + `<div class="empty-state">
       ${_EMPTY_ICON}
       <div class="empty-state-title">No training history yet</div>
       <div class="empty-state-sub">Complete a training session to see your progress here.</div>
@@ -2542,7 +2911,7 @@ function renderProgress() {
     </div>
   </div>`;
 
-  panel.innerHTML = `<div class="prog-layout">
+  panel.innerHTML = playHtml + `<div class="prog-layout">
     ${summaryHtml}
     ${sparkSection}
     ${highlightsHtml}
@@ -2620,11 +2989,9 @@ function renderTrainer() {
   const panel = els.trainerPanel();
   if (!panel) return;
 
-  // Debug banner so user can distinguish old vs new trainer
-  const _oldTrainerBanner = `<div style="background:#1e1b4b;border:2px solid #6366f1;border-radius:8px;padding:8px 14px;font-size:12px;color:#a5b4fc;margin-bottom:10px;font-family:monospace">
-    &#9888; OLD TRAINER (Analysis &gt; Trainer tab) &mdash; Leak-based preflop drills only.<br>
-    &#127909; <strong style="color:#c4b5fd">Looking for Replay Drills?</strong>
-    <a href="#" onclick="spNavigate('/trainer?mode=replay-drill');return false;" style="color:#818cf8;text-decoration:underline">Click here to open the Practice page</a>
+  const _oldTrainerBanner = `<div class="trainer-practice-link">
+    Looking for replay drills?
+    <a href="#" onclick="spNavigate('/trainer?mode=replay-drill');return false;">Open the Practice page</a>
   </div>`;
 
   // Daily coach — plan screen
@@ -2679,6 +3046,8 @@ function renderTrainer() {
         <div class="trainer-start-leaks-label">Targeted leaks:</div>
         ${leakListHtml}
         <button class="btn-primary trainer-start-btn" id="trainer-start-btn">Start Drill Session</button>
+        <button class="btn-secondary trainer-start-btn trainer-real-btn" id="trainer-real-btn">Drill your real spots: facing a raise</button>
+        <div class="trainer-real-desc">12 spots from your own hands (SB / BTN / CO / HJ facing one open, 30bb+). Mostly spots you played wrong, mixed with ones you got right.</div>
         ${_historyWidget(loadTrainerHistory())}
       </div>
     </div>`;
@@ -2686,6 +3055,7 @@ function renderTrainer() {
     document.getElementById('trainer-start-btn').addEventListener('click', () => {
       startTrainerSession(drillPool, drillCount);
     });
+    document.getElementById('trainer-real-btn').addEventListener('click', startRealSpotSession);
     return;
   }
 
@@ -2750,9 +3120,13 @@ function renderTrainer() {
       </div>
     </div>`;
 
-    document.getElementById('trainer-again-btn').addEventListener('click', () => {
+    const wasRealSpots = drills[0] && drills[0].lk === 'vs_raise_real';
+    const againBtn = document.getElementById('trainer-again-btn');
+    if (wasRealSpots) againBtn.textContent = 'Drill again — new set of your spots';
+    againBtn.addEventListener('click', () => {
       trainerState = null;
-      renderTrainer();
+      if (wasRealSpots) startRealSpotSession();
+      else renderTrainer();
     });
     return;
   }
@@ -2873,6 +3247,75 @@ function startTrainerSession(pool, count, opts = {}) {
     coachMode:      opts.coachMode || false,
   };
   renderTrainer();
+}
+
+/* ── Real-spot drills: facing a single raise, from the player's own hands ── */
+
+const _SUIT_SYM = { s: '♠', h: '♥', d: '♦', c: '♣' };
+// The trainer table is drawn 6-max; map 8/9-max seat names onto it.
+const _TABLE_SEAT = { HJ: 'MP', LJ: 'MP', UTG1: 'UTG', UTG2: 'UTG' };
+const _REAL_ACTION = { '3bet': 'threbet', call: 'call', fold: 'fold' };
+const _REAL_ACTION_TEXT = { threbet: '3-bet', call: 'called', fold: 'folded' };
+
+function _cardsToSymbols(hole) {
+  return (hole || '').split(/\s+/).filter(Boolean)
+    .map(c => `${c.slice(0, -1)}${_SUIT_SYM[c.slice(-1).toLowerCase()] || ''}`)
+    .join(' ');
+}
+
+function _realSpotToDrill(spot) {
+  const rec = spot.recommendation;
+  const ok = _REAL_ACTION[rec.best];
+  const alt = (rec.acceptable || []).map(a => _REAL_ACTION[a]).filter(a => a !== ok);
+  const raise = parseFloat(spot.raise_to_bb).toFixed(1);
+  const eff = parseFloat(spot.eff_bb).toFixed(0);
+  const seat = _TABLE_SEAT[spot.position] || spot.position;
+  const opener = _TABLE_SEAT[spot.opener_position] || spot.opener_position;
+  const behind = spot.position === 'SB' ? ' The BB is still to act behind you.' : '';
+  const you = _REAL_ACTION[spot.hero_action];
+  const fbFor = v => (_isAcceptable({ ok, alt }, v) ? '' : 'Not the best line here. ') + rec.reason;
+  return {
+    lk: 'vs_raise_real',
+    sit: `${spot.opener_position} opens to ${raise}bb. It folds to you in the ${spot.position}.${behind}`,
+    hand: _cardsToSymbols(spot.hole_cards),
+    ctx: `${seat} facing ${opener} open to ${raise}bb · ${eff}bb eff · 6-max`,
+    opts: [
+      { v: 'fold',    t: 'Fold' },
+      { v: 'call',    t: 'Call' },
+      { v: 'threbet', t: '3-bet' },
+    ],
+    ok,
+    alt,
+    fb: { fold: fbFor('fold'), call: fbFor('call'), threbet: fbFor('threbet') },
+    real_note: `In the real hand (#${spot.hand_external_id.slice(-9)}) you ${_REAL_ACTION_TEXT[you]}. `
+      + `Recommendation source: ${rec.backing}, not solver output.`,
+  };
+}
+
+async function startRealSpotSession() {
+  const btn = document.getElementById('trainer-real-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading your spots…'; }
+  try {
+    const data = await apiFetch(`/players/${encodeURIComponent(currentPlayerId)}/drills/vs-raise?limit=12`);
+    const drills = _shuffle((data.spots || []).map(_realSpotToDrill));
+    if (!drills.length) {
+      if (btn) btn.textContent = 'No facing-a-raise spots found at 30bb+';
+      return;
+    }
+    const title = 'Facing a raise — your real hands';
+    drills.forEach((d, i) => Object.assign(d, {
+      leak_title: title, leak_severity: 'high', real_example: null,
+      is_group_start: i === 0, group_num: 1, drill_in_group: i + 1,
+      group_size: drills.length, _total_groups: 1,
+    }));
+    trainerState = {
+      drills, idx: 0, score: 0, answered: false, chosen: null, phase: 'replay', coachMode: false,
+      perLeakResults: { vs_raise_real: { title, severity: 'high', correct: 0, total: 0 } },
+    };
+    renderTrainer();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = `Couldn't load spots: ${err.message}`; }
+  }
 }
 
 /* ============================================================
@@ -3071,7 +3514,6 @@ function renderDrill() {
   const { drills, idx, score, answered, chosen, phase } = trainerState;
   const drill = drills[idx];
   const total = drills.length;
-  console.log('[TRAINER] renderDrill (old analysis trainer)', { lk: drill.lk, hand: drill.hand, ctx: drill.ctx });
 
   const leakCtx = drill.leak_title
     ? `<span class="trainer-leak-ctx">Leak ${drill.group_num}/${drill._total_groups}: ${escHtml(drill.leak_title)} &middot; Drill ${drill.drill_in_group}/${drill.group_size}</span>`
@@ -3117,8 +3559,8 @@ function renderDrill() {
     for (const opt of drill.opts) {
       let extraCls = '';
       if (answered) {
-        if (opt.v === drill.ok)                        extraCls = ' btn-selected-correct';
-        else if (opt.v === chosen && chosen !== drill.ok) extraCls = ' btn-selected-wrong';
+        if (_isAcceptable(drill, opt.v))                          extraCls = ' btn-selected-correct';
+        else if (opt.v === chosen && !_isAcceptable(drill, chosen)) extraCls = ' btn-selected-wrong';
       }
       buttonsHtml += `<button class="action-btn ${btnClass(opt.v)}${extraCls}" data-val="${escHtml(opt.v)}" ${answered ? 'disabled' : ''}>${escHtml(optLabel(opt))}</button>`;
     }
@@ -3126,16 +3568,17 @@ function renderDrill() {
 
     let feedbackHtml = '';
     if (answered) {
-      const isCorrect = chosen === drill.ok;
+      const isCorrect = _isAcceptable(drill, chosen);
       const feedbackCls = isCorrect ? 'is-correct' : 'is-wrong';
       const icon = isCorrect ? '\u2713' : '\u2717';
       const correctOptLabel = drill.opts.find(o => o.v === drill.ok)?.t || drill.ok;
       const verdictText = isCorrect
-        ? 'Correct'
+        ? (chosen === drill.ok ? 'Correct' : `Acceptable \u2014 best: ${escHtml(correctOptLabel)}`)
         : `Wrong \u2014 correct: ${escHtml(correctOptLabel)}`;
       feedbackHtml = `<div class="drill-feedback ${feedbackCls}">
         <div class="feedback-verdict"><span class="feedback-icon">${icon}</span>${verdictText}</div>
         <div class="feedback-text">${escHtml(drill.fb[chosen] || drill.fb[drill.ok] || '')}</div>
+        ${drill.real_note ? `<div class="feedback-real">${escHtml(drill.real_note)}</div>` : ''}
       </div>
       <button class="btn-next" id="drill-next-btn">${idx + 1 < total ? 'Next Drill \u2192' : 'See Results'}</button>`;
     }
@@ -3158,7 +3601,7 @@ function renderDrill() {
 function submitAnswer(val) {
   if (!trainerState || trainerState.answered) return;
   const drill = trainerState.drills[trainerState.idx];
-  const isCorrect = val === drill.ok;
+  const isCorrect = _isAcceptable(drill, val);
   trainerState.answered = true;
   trainerState.chosen   = val;
   if (isCorrect) trainerState.score += 1;
@@ -3287,12 +3730,21 @@ function renderImport() {
     const form = new FormData();
     selectedFiles.forEach(f => form.append('files', f));
 
-    const loggedIn = authIsLoggedIn();
+    let loggedIn = authIsLoggedIn();
     const endpoint = loggedIn ? `${API}/me/import` : `${API}/ingest/upload`;
     const headers = loggedIn ? _coAuthHeaders() : {};
 
     try {
-      const res = await fetch(endpoint, { method: 'POST', body: form, headers });
+      let res = await fetch(endpoint, { method: 'POST', body: form, headers });
+      if (loggedIn && res.status === 401) {
+        // Stale or expired login: drop it and import without an account
+        // instead of failing the whole upload.
+        authClearToken();
+        authClearUser();
+        if (typeof authUpdateNav === 'function') authUpdateNav();
+        loggedIn = false;
+        res = await fetch(`${API}/ingest/upload`, { method: 'POST', body: form });
+      }
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
         try { detail = (await res.json()).detail || detail; } catch (_) {}
@@ -3436,22 +3888,29 @@ async function _imTryRealHand(resultEl, leakType, seed) {
     const { hands } = await res.json();
     if (!hands || !hands.length) return;
 
+    // Folded preflop without investing: lost at most the ante (+ SB's half blind),
+    // i.e. under 1bb.  Hands with an unknown result are skipped.
+    const foldedCheap = h => {
+      if (h.net_won_bb == null) return false;
+      const bb = parseFloat(h.net_won_bb);
+      return bb <= 0 && bb > -1;
+    };
     let match;
     if (leakType === 'steal') {
-      // Find a BTN or CO hand where net_won is 0 (folded without investing) at 12–25bb
+      // Find a BTN or CO hand folded without investing at 12–25bb
       match = hands.find(h =>
         (h.position === 'BTN' || h.position === 'CO') &&
         h.stack_bb != null &&
         parseFloat(h.stack_bb) >= 12 && parseFloat(h.stack_bb) <= 25 &&
-        parseFloat(h.net_won || '0') === 0
+        foldedCheap(h)
       );
     } else {
-      // Find a BTN/CO/SB hand at 8–15bb where net_won is 0 (folded preflop)
+      // Find a BTN/CO/SB hand at 8–15bb folded preflop
       match = hands.find(h =>
         (h.position === 'BTN' || h.position === 'CO' || h.position === 'SB') &&
         h.stack_bb != null &&
         parseFloat(h.stack_bb) >= 8 && parseFloat(h.stack_bb) <= 15 &&
-        parseFloat(h.net_won || '0') === 0
+        foldedCheap(h)
       );
     }
     if (!match) return;
@@ -3984,15 +4443,29 @@ function rsRender() {
     ? '#' + hand.external_id.replace(/^(Poker Hand #|Hand #|ClubGG Hand #)/i, '').slice(-12)
     : '';
 
-  const dotsHtml = allExamples.map((_, i) =>
-    `<span class="rs-dot${i === exIdx ? ' rs-dot--active' : ''}" data-ex="${i}"></span>`
-  ).join('');
-  const navHtml = allExamples.length > 1 ? `
+  let navHtml;
+  if (_rs.reviewMode) {
+    const { rvHandIdx, rvFilteredHands } = _rs;
+    const total = rvFilteredHands ? rvFilteredHands.length : 1;
+    const hasPrev = rvHandIdx > 0;
+    const hasNext = rvHandIdx < total - 1;
+    navHtml = `
+    <div class="rs-nav">
+      <button class="rs-nav-btn" id="rs-prev-hand" ${hasPrev ? '' : 'disabled'}>‹</button>
+      <span class="rs-nav-counter">${rvHandIdx + 1} / ${total}</span>
+      <button class="rs-nav-btn" id="rs-next-hand" ${hasNext ? '' : 'disabled'}>›</button>
+    </div>`;
+  } else {
+    const dotsHtml = allExamples.map((_, i) =>
+      `<span class="rs-dot${i === exIdx ? ' rs-dot--active' : ''}" data-ex="${i}"></span>`
+    ).join('');
+    navHtml = allExamples.length > 1 ? `
     <div class="rs-nav">
       <button class="rs-nav-btn" id="rs-prev" ${exIdx > 0 ? '' : 'disabled'}>‹</button>
       <div class="rs-nav-dots">${dotsHtml}</div>
       <button class="rs-nav-btn" id="rs-next" ${exIdx < allExamples.length - 1 ? '' : 'disabled'}>›</button>
     </div>` : '<div class="rs-nav"></div>';
+  }
 
   // Per-seat unique color identity — each player visually distinct
   const SEAT_BG = [
@@ -4140,6 +4613,7 @@ function rsUpdateLog() {
 
 function rsShowDecision() {
   if (!_rs) return;
+  if (_rs.reviewMode) { rsShowReviewReveal(); return; }
   _rs.phase = 'decision';
   const { panel } = _rs;
   panel.querySelector('#rs-table')?.classList.add('rs-table--decision');
@@ -4463,8 +4937,21 @@ function rsActionBubble(panel, seatEl, text, cls) {
 
 function rsBindControls(panel) {
   panel.querySelector('#rs-back')?.addEventListener('click', () => {
+    if (_rs?.reviewMode) { const { rvOnBack } = _rs; _rsStop(); if (rvOnBack) rvOnBack(); return; }
     _rsStop();
     if (_rsOnBack) { const cb = _rsOnBack; _rsOnBack = null; cb(); } else { renderLeaks(leaksData); }
+  });
+
+  // Review mode hand navigation
+  panel.querySelector('#rs-prev-hand')?.addEventListener('click', () => {
+    if (!_rs?.reviewMode) return;
+    const { rvHandIdx, rvFilteredHands, rvPanel } = _rs;
+    if (rvHandIdx > 0) { _rsStop(); _trOpenHand(rvPanel, rvFilteredHands, rvHandIdx - 1); }
+  });
+  panel.querySelector('#rs-next-hand')?.addEventListener('click', () => {
+    if (!_rs?.reviewMode) return;
+    const { rvHandIdx, rvFilteredHands, rvPanel } = _rs;
+    if (rvHandIdx < rvFilteredHands.length - 1) { _rsStop(); _trOpenHand(rvPanel, rvFilteredHands, rvHandIdx + 1); }
   });
 
   // Dot nav
@@ -6901,8 +7388,8 @@ async function _anInitHub() {
   ];
 
   const recentHands = [
-    { stage: 'Final Table', stageClass: 'an-stage--final',  stack: '22bb', cards: 'A\u2660 K\u2665', desc: 'BTN open \u00b7 3-bet pot \u00b7 c-bet fold',               result: '+18.5',   pos: true,  mistake: false },
-    { stage: 'Bubble',      stageClass: 'an-stage--bubble', stack: '14bb', cards: 'Q\u2666 Q\u2663', desc: 'SB shove vs BTN open',                                    result: '+42.0',   pos: true,  mistake: false },
+    { stage: 'Final Table', stageClass: 'an-stage--final',  stack: '22bb', cards: 'A\u2660 K\u2665', desc: 'BTN open \u00b7 3-bet pot \u00b7 c-bet fold',               result: '18.5',    pos: true,  mistake: false },
+    { stage: 'Bubble',      stageClass: 'an-stage--bubble', stack: '14bb', cards: 'Q\u2666 Q\u2663', desc: 'SB shove vs BTN open',                                    result: '42.0',    pos: true,  mistake: false },
     { stage: 'ITM',         stageClass: 'an-stage--itm',    stack: '31bb', cards: 'J\u2660 T\u2660', desc: 'BB defend \u00b7 check-raise flop \u00b7 folded turn',    result: '\u221211.0', pos: false, mistake: true,  mistakeLabel: 'Timing leak' },
     { stage: 'Early',       stageClass: 'an-stage--early',  stack: '80bb', cards: '9\u2663 9\u2666', desc: 'CO open \u00b7 folded to 3-bet',                          result: '\u22122.5',  pos: false, mistake: true,  mistakeLabel: 'BTN fold too often' },
     { stage: 'Bubble',      stageClass: 'an-stage--bubble', stack: '18bb', cards: '7\u2665 7\u2660', desc: 'UTG shove \u00b7 called by AK \u00b7 lost',               result: '\u221218.0', pos: false, mistake: false },
@@ -7058,7 +7545,8 @@ async function _anInitHub() {
             ? (liveHands.length === 0
                 ? `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No hands found. Import hand history files to start.</td></tr>`
                 : liveHands.slice(0, 10).map(h => {
-                    const netWon = h.net_won != null ? parseFloat(h.net_won) : null;
+                    // Result in big blinds (net_won itself is in chips).
+                    const netWon = h.net_won_bb != null ? parseFloat(h.net_won_bb) : null;
                     const stackBb = h.stack_bb ? `${parseFloat(h.stack_bb).toFixed(0)}bb` : '—';
                     const pos = h.position || '—';
                     const board = h.board_cards || '';
@@ -11981,12 +12469,8 @@ function trLoadScenario() {
   const colsClass = `tr-actions--${s.options.length}`;
   const qIdx = `${_trSession.queueIdx}/${_trSession.queue.length}`;
 
-  console.log('[TRAINER] general scenario renderer', { id: s.id, type: s.type, mode: s.mode });
   board.innerHTML = `
     <div class="tr-scenario" id="tr-scenario">
-      <div style="background:#14532d;border:1px solid #16a34a;border-radius:6px;padding:6px 10px;font-size:11px;color:#86efac;margin-bottom:8px;font-family:monospace">
-        RENDERER: general-scenario &nbsp;|&nbsp; id: ${escHtml(s.id)} &nbsp;|&nbsp; mode: ${escHtml(s.mode || '?')} &nbsp;|&nbsp; type: ${escHtml(s.type || '?')}
-      </div>
       <div class="tr-scenario-context">
         <span class="tr-stage-badge ${_trStageClass(s.stage)}">${escHtml(s.stage_label)}</span>
         <span class="tr-context-detail">${escHtml(s.stage_detail)}</span>
@@ -12305,7 +12789,6 @@ function _trRenderReplayDrill(board, s) {
   const colsClass = `tr-actions--${s.options.length}`;
   const state = buildTrainerHandState(s);
   const { seats, potBb, boardCards, actionLog } = state;
-  console.log('[TRAINER] _trRenderReplayDrill', { id: s.id, seats: seats.length, potBb, actions: actionLog.length });
 
   const villainPos = _trRdPrimaryVillain(s);
   const currentStreet = boardCards.length === 0 ? null
@@ -12397,9 +12880,6 @@ function _trRenderReplayDrill(board, s) {
 
   board.innerHTML = `
     <div class="tr-scenario tr-scenario--replay-drill" id="tr-scenario">
-      <div style="background:#1e1b4b;border:1px solid #6366f1;border-radius:6px;padding:6px 10px;font-size:11px;color:#a5b4fc;margin-bottom:8px;font-family:monospace">
-        RENDERER: _trRenderReplayDrill &nbsp;|&nbsp; id: ${escHtml(s.id)} &nbsp;|&nbsp; seats: ${seats.length} &nbsp;|&nbsp; pot: ${potBb.toFixed(1)}bb &nbsp;|&nbsp; actions: ${actionLog.length}
-      </div>
       <div class="tr-scenario-context">
         <span class="tr-replay-badge">&#127909; Replay Drill</span>
         <span class="tr-stage-badge ${_trStageClass(s.stage)}">${escHtml(s.stage_label)}</span>
@@ -12675,4 +13155,444 @@ function trShowSummary() {
   board.querySelectorAll('[data-tr-nav]').forEach(btn => {
     btn.addEventListener('click', () => spNavigate(btn.dataset.trNav));
   });
+}
+
+/* ============================================================
+   TOURNAMENT REVIEW MODE
+   ============================================================ */
+
+let _trReviewState = null; // { tournamentId, hands, filter }
+
+// ── Entry point called by switchTab('review') ──────────────────────────────
+
+function renderTournamentReview() {
+  const panel = els.reviewPanel();
+  if (!panel) return;
+  if (!authIsLoggedIn()) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">Sign in to review your hands</div>
+      <div class="empty-state-sub">Tournament review requires a linked account.</div>
+    </div>`;
+    return;
+  }
+  if (_trReviewState?.tournamentId) {
+    _trRenderHandView(panel, _trReviewState.hands, _trReviewState.filter || 'all', 0);
+  } else {
+    _trRenderList(panel);
+  }
+}
+
+// ── Tournament list ────────────────────────────────────────────────────────
+
+async function _trRenderList(panel) {
+  panel.innerHTML = `<div class="loading-state"><div class="spinner"></div>Loading tournaments…</div>`;
+  let tournaments;
+  try {
+    tournaments = await _trFetch('/me/tournaments');
+  } catch (e) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">Could not load tournaments</div>
+      <div class="empty-state-sub">${escHtml(String(e.message || e))}</div>
+    </div>`;
+    return;
+  }
+  if (!tournaments.length) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">No tournament sessions yet</div>
+      <div class="empty-state-sub">Import hand history files to start reviewing sessions.</div>
+      <button class="sp-btn-primary" style="margin-top:16px" onclick="switchTab('import')">Import Hands</button>
+    </div>`;
+    return;
+  }
+  panel.innerHTML = `
+    <div class="rv-list-wrap">
+      <h2 class="rv-list-title">Tournament Sessions</h2>
+      <div class="rv-list" id="rv-list"></div>
+    </div>`;
+  const list = panel.querySelector('#rv-list');
+  list.innerHTML = tournaments.map(t => {
+    const date = t.last_hand_at ? new Date(t.last_hand_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    const net = t.hero_net_bb != null
+      ? `<span class="rv-net ${t.hero_net_bb >= 0 ? 'rv-net--pos' : 'rv-net--neg'}">${t.hero_net_bb >= 0 ? '+' : ''}${t.hero_net_bb}bb</span>`
+      : '';
+    return `<div class="rv-row" data-tid="${escHtml(t.id)}">
+      <div class="rv-row-left">
+        <div class="rv-row-table">${escHtml(t.table_name)}</div>
+        <div class="rv-row-meta">${escHtml(date)} &middot; ${t.hand_count} hand${t.hand_count !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="rv-row-right">
+        ${net}
+        <button class="sp-btn-primary rv-review-btn" data-tid="${escHtml(t.id)}">Review</button>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.rv-review-btn').forEach(btn => {
+    btn.addEventListener('click', () => _trLoadTournament(panel, btn.dataset.tid));
+  });
+}
+
+async function _trLoadTournament(panel, tid) {
+  panel.innerHTML = `<div class="loading-state"><div class="spinner"></div>Loading hands…</div>`;
+  let hands;
+  try {
+    hands = await _trFetch(`/me/tournaments/${encodeURIComponent(tid)}/review`);
+  } catch (e) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">Could not load tournament hands</div>
+      <div class="empty-state-sub">${escHtml(String(e.message || e))}</div>
+      <button class="sp-btn-secondary" style="margin-top:16px" id="rv-back-list">Back to list</button>
+    </div>`;
+    panel.querySelector('#rv-back-list')?.addEventListener('click', () => { _trReviewState = null; _trRenderList(panel); });
+    return;
+  }
+  _trReviewState = { tournamentId: tid, hands, filter: 'all' };
+  _trRenderHandView(panel, hands, 'all', 0);
+}
+
+// ── Hand view ──────────────────────────────────────────────────────────────
+
+function _trRenderHandView(panel, hands, filter, startIdx) {
+  const filtered = _trFilterHands(hands, filter);
+  if (!filtered.length) {
+    panel.innerHTML = `<div class="empty-state">${_EMPTY_ICON}
+      <div class="empty-state-title">No hands match this filter</div>
+      <button class="sp-btn-secondary" style="margin-top:16px" id="rv-filter-all">Show All</button>
+    </div>`;
+    panel.querySelector('#rv-filter-all')?.addEventListener('click', () => {
+      _trReviewState.filter = 'all';
+      _trRenderHandView(panel, hands, 'all', 0);
+    });
+    return;
+  }
+  _trOpenHand(panel, filtered, Math.min(startIdx, filtered.length - 1));
+}
+
+function _trFilterHands(hands, filter) {
+  if (filter === 'all') return hands;
+  if (filter === 'speculative') return hands.filter(h => h.analysis?.confidence === 'speculative');
+  if (filter === 'mistakes')    return hands.filter(h => ['minor', 'major', 'critical'].includes(h.analysis?.mistake_severity));
+  if (filter === 'major')       return hands.filter(h => ['major', 'critical'].includes(h.analysis?.mistake_severity));
+  if (filter === 'good')        return hands.filter(h => h.analysis?.mistake_severity === 'good');
+  // Legacy fallback for old coaching.severity values
+  return hands.filter(h => h.analysis?.mistake_severity === filter || h.coaching?.severity === filter);
+}
+
+function _trOpenHand(panel, filteredHands, idx) {
+  const item = filteredHands[idx];
+  if (!item) return;
+  const hand    = item.hand;
+  const heroId  = item.hero_player_id;
+  const heroHp  = hand.hand_players.find(hp => hp.player_id === heroId);
+  if (!heroHp) return;
+  const coaching  = item.coaching;
+  const timeline  = rsBuildFullTimeline(hand);
+  const seatOrder = rsBuildSeatOrder(hand.hand_players, heroId);
+  const currentFilter = _trReviewState?.filter || 'all';
+  const allHands      = _trReviewState?.hands || filteredHands;
+
+  const analysis = item.analysis || null;
+
+  _rsStop();
+  _rs = {
+    panel,
+    hand, heroId, heroHp,
+    // Minimal leak-compatible fields so rsRender / rsBindControls work unchanged
+    leak: { leak_id: 'review', title: _trAnalysisTitle(analysis, coaching), severity: _trMistakeSev(analysis) },
+    example: {}, allExamples: [], exIdx: 0,
+    opts: [], correct: null,
+    timeline, seatOrder,
+    step: 0, decisionStep: timeline.length,
+    phase: 'replay', chosen: null, logOpen: false, playing: true, playTimer: null,
+    // Review-mode extras
+    reviewMode: true,
+    rvHandIdx: idx, rvFilteredHands: filteredHands, rvPanel: panel,
+    rvCoaching: coaching,
+    rvAnalysis: analysis,
+    rvOnBack: () => { _trReviewState = null; _trRenderList(panel); },
+  };
+  panel.innerHTML = _trRenderFilterBar(allHands, currentFilter, filteredHands, idx) + rsRender();
+  _trBindFilterBar(panel, allHands, filteredHands, currentFilter);
+  rsBindControls(panel);
+  if (timeline.length > 0) rsScheduleNext();
+  else rsShowReviewReveal();
+}
+
+function _trAnalysisTitle(analysis, coaching) {
+  if (analysis) {
+    const sev = { good: 'Good Play', none: 'Review', minor: 'Mistake', major: 'Major Mistake', critical: 'Critical Mistake' };
+    return `${sev[analysis.mistake_severity] || 'Review'} — ${analysis.spot_type}`;
+  }
+  if (!coaching) return 'Hand Review';
+  const sev = { good: 'Good Play', neutral: 'Review', small_mistake: 'Mistake', big_mistake: 'Major Mistake' };
+  return `${sev[coaching.severity] || 'Review'} — ${coaching.spot_type}`;
+}
+
+function _trMistakeSev(analysis) {
+  if (!analysis) return 'neutral';
+  const map = { good: 'low', none: 'low', minor: 'medium', major: 'high', critical: 'critical' };
+  return map[analysis.mistake_severity] || 'low';
+}
+
+// ── Filter bar ─────────────────────────────────────────────────────────────
+
+function _trRenderFilterBar(allHands, activeFilter, filteredHands, handIdx) {
+  let nMajor = 0, nMistakes = 0, nGood = 0, nSpec = 0;
+  allHands.forEach(h => {
+    const sev = h.analysis?.mistake_severity;
+    const conf = h.analysis?.confidence;
+    if (sev === 'major' || sev === 'critical') nMajor++;
+    if (sev === 'minor') nMistakes++;
+    if (sev === 'good') nGood++;
+    if (conf === 'speculative') nSpec++;
+  });
+  const pills = [
+    { k: 'all',         label: `All (${allHands.length})` },
+    { k: 'major',       label: `Major (${nMajor})` },
+    { k: 'mistakes',    label: `Mistakes (${nMistakes})` },
+    { k: 'good',        label: `Good (${nGood})` },
+    { k: 'speculative', label: `Speculative (${nSpec})` },
+  ].map(p =>
+    `<button class="rv-pill${activeFilter === p.k ? ' rv-pill--active' : ''}" data-sev="${p.k}">${escHtml(p.label)}</button>`
+  ).join('');
+  return `<div class="rv-filter-bar" id="rv-filter-bar">${pills}</div>`;
+}
+
+function _trBindFilterBar(panel, allHands, filteredHands, currentFilter) {
+  panel.querySelectorAll('.rv-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sev = btn.dataset.sev;
+      if (_trReviewState) _trReviewState.filter = sev;
+      _trRenderHandView(panel, allHands, sev, 0);
+    });
+  });
+}
+
+// ── Review reveal (coaching panel) ────────────────────────────────────────
+
+function rsShowReviewReveal() {
+  if (!_rs) return;
+  _rs.phase = 'reveal';
+  const { panel, rvAnalysis, rvCoaching, rvHandIdx, rvFilteredHands, heroHp } = _rs;
+  const tableEl = panel.querySelector('#rs-table');
+  if (tableEl) tableEl.classList.remove('rs-table--decision');
+  const dockEl = panel.querySelector('#rs-decision-dock');
+  if (dockEl) dockEl.hidden = true;
+  const ctrlWrap = panel.querySelector('.rs-tbl-controls');
+  if (ctrlWrap) ctrlWrap.style.display = '';
+
+  const revealEl = panel.querySelector('#rs-reveal');
+  if (!revealEl) return;
+  revealEl.hidden = false;
+
+  const pos     = heroHp?.position || '?';
+  const stackBb = heroHp?.stack_bb ? parseFloat(heroHp.stack_bb).toFixed(0) : '?';
+  const total   = rvFilteredHands ? rvFilteredHands.length : 1;
+  const hasPrev = rvHandIdx > 0;
+  const hasNext = rvHandIdx < total - 1;
+
+  // Prefer the new analysis object; fall back to legacy coaching
+  const src = rvAnalysis || rvCoaching;
+  if (!src) {
+    revealEl.innerHTML = `<div class="rs-rev-section"><div class="rs-rev-label">Hand Review</div>
+      <div class="rs-tip"><div class="rs-tip-val">No analysis data for this hand.</div></div>
+    </div>` + _rvNavBtns(hasPrev, hasNext);
+    _rvBindNavBtns(revealEl);
+    return;
+  }
+
+  // Severity mapping — handle both old (coaching) and new (analysis) field names
+  const mistakeSev = rvAnalysis?.mistake_severity || null;
+  const legacySev  = rvCoaching?.severity || null;
+  const SEV_CLS = {
+    good: 'rv-sev--good', none: 'rv-sev--neutral',
+    minor: 'rv-sev--minor', major: 'rv-sev--major', critical: 'rv-sev--major',
+    small_mistake: 'rv-sev--minor', big_mistake: 'rv-sev--major', neutral: 'rv-sev--neutral',
+  };
+  const SEV_LBL = {
+    good: 'Good Play', none: 'Neutral',
+    minor: 'Mistake', major: 'Major Mistake', critical: 'Critical Mistake',
+    small_mistake: 'Mistake', big_mistake: 'Major Mistake', neutral: 'Neutral',
+  };
+  const activeSev = mistakeSev || legacySev || 'none';
+  const sevCls = SEV_CLS[activeSev] || 'rv-sev--neutral';
+  const sevLbl = SEV_LBL[activeSev] || 'Neutral';
+
+  // Confidence label (new engine only)
+  const isSpeculative = rvAnalysis?.confidence === 'speculative';
+  const confLbl = rvAnalysis
+    ? rvAnalysis.confidence.toUpperCase()
+    : '';
+  const confBadgeCls = isSpeculative ? 'rv-conf--spec' : 'rv-conf--inf';
+  const confBadge = confLbl
+    ? `<span class="rv-conf-badge ${confBadgeCls}">${escHtml(confLbl)}</span>`
+    : '';
+
+  const speculativeNote = isSpeculative
+    ? `<div class="rv-spec-note">Estimate only — exact solver/ICM data unavailable.</div>`
+    : '';
+
+  // Key factors (new engine only)
+  const keyFactors = rvAnalysis?.key_factors || [];
+  const keyFactorsHtml = keyFactors.length
+    ? `<div class="rs-tip">
+        <div class="rs-tip-lbl">Key factors</div>
+        <div class="rs-tip-val rv-factors">${keyFactors.map(f => `<span class="rv-factor">${escHtml(f)}</span>`).join('')}</div>
+      </div>`
+    : '';
+
+  // Range context (new engine only)
+  const rangeCtx = rvAnalysis?.range_context || '';
+  const rangePos = rvAnalysis?.hero_range_position || 'unknown';
+  const RANGE_POS_CLS = { top: 'rv-rpos--top', mid: 'rv-rpos--mid', bottom: 'rv-rpos--bottom', outside: 'rv-rpos--outside' };
+  const rangeHtml = rangeCtx
+    ? `<div class="rs-tip">
+        <div class="rs-tip-lbl">Range context</div>
+        <div class="rs-tip-val">${escHtml(rangeCtx)}${rangePos !== 'unknown'
+          ? ` &mdash; <span class="rv-rpos-badge ${RANGE_POS_CLS[rangePos] || ''}">${escHtml(rangePos)} of range</span>`
+          : ''}</div>
+      </div>
+      <div class="rv-range-note">Range-based estimate &mdash; not exact solver output</div>`
+    : '';
+
+  // Backing label (new engine only)
+  const backingHtml = rvAnalysis?.backing
+    ? `<div class="rv-backing">Basis: <span class="rv-backing-val">${escHtml(rvAnalysis.backing)}</span></div>`
+    : '';
+
+  // Practical exploit adjustment (opponent profile layer)
+  const exploit = rvAnalysis?.exploit_adjustment || '';
+  const villainProfileRaw = rvAnalysis?.villain_profile || '';
+  const villainConf = rvAnalysis?.villain_profile_confidence || '';
+  let exploitHtml = '';
+
+  if (villainProfileRaw === 'unknown') {
+    exploitHtml = `<div class="rv-exploit rv-exploit--unknown">
+      <div class="rv-exploit-header">&#x1F9E0; Practical Adjustment</div>
+      <div class="rv-exploit-no-data">Not enough hands on villain for a reliable exploit adjustment.</div>
+    </div>`;
+  } else if (villainProfileRaw === 'balanced') {
+    const confBadgeHtml = villainConf
+      ? `<span class="rv-exploit-conf rv-exploit-conf--${escHtml(villainConf)}">${escHtml(villainConf)}</span>`
+      : '';
+    exploitHtml = `<div class="rv-exploit">
+      <div class="rv-exploit-header">&#x1F9E0; Practical Adjustment</div>
+      <div class="rv-exploit-villain">Villain: Balanced ${confBadgeHtml}</div>
+      <div class="rv-exploit-no-data">Player appears balanced — stay close to Nash baseline.</div>
+    </div>`;
+  } else if (exploit && villainProfileRaw) {
+    const villainLabel = villainProfileRaw.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const confBadgeHtml = villainConf
+      ? `<span class="rv-exploit-conf rv-exploit-conf--${escHtml(villainConf)}">${escHtml(villainConf)}</span>`
+      : '';
+    const lines = exploit.split('\n');
+    const hasStats = lines[0].startsWith('VPIP');
+    const statsHtml = hasStats ? `<div class="rv-exploit-stats">${escHtml(lines[0])}</div>` : '';
+    const bulletLines = lines.slice(hasStats ? 1 : 0).filter(b => b.trim());
+    const bulletsHtml = bulletLines.map(b => `<div class="rv-exploit-bullet">${escHtml(b)}</div>`).join('');
+    exploitHtml = `<div class="rv-exploit">
+      <div class="rv-exploit-header">&#x1F9E0; Practical Adjustment</div>
+      <div class="rv-exploit-villain">Villain: ${escHtml(villainLabel)} ${confBadgeHtml}</div>
+      ${statsHtml}
+      <div class="rv-exploit-bullets">${bulletsHtml}</div>
+    </div>`;
+  }
+
+  revealEl.innerHTML = `
+    <div class="rs-rev-section">
+      <div class="rs-rev-label">Analysis ${confBadge} <span class="rv-sev-badge ${sevCls}">${escHtml(sevLbl)}</span></div>
+      ${speculativeNote}
+      <div class="rs-tip">
+        <div class="rs-tip-lbl">Spot</div>
+        <div class="rs-tip-val">${escHtml(src.spot_type)} &middot; ${escHtml(pos)} &middot; ${escHtml(stackBb)}bb</div>
+      </div>
+      <div class="rs-tip">
+        <div class="rs-tip-lbl">Your action</div>
+        <div class="rs-tip-val">${escHtml(src.hero_action)}</div>
+      </div>
+      <div class="rs-tip">
+        <div class="rs-tip-lbl">Recommended</div>
+        <div class="rs-tip-val rv-recommended">${escHtml(src.recommended_action)}</div>
+      </div>
+      <div class="rs-tip">
+        <div class="rs-tip-lbl">Explanation</div>
+        <div class="rs-tip-val">${escHtml(src.explanation)}</div>
+      </div>
+      ${keyFactorsHtml}
+      ${rangeHtml}
+      ${backingHtml}
+      ${exploitHtml}
+    </div>
+    <details class="rv-limitations">
+      <summary class="rv-limitations-toggle">Known limitations</summary>
+      <ul class="rv-limitations-list">
+        <li>Analysis is rule-based (heuristic / range-based estimate). No solver was run.</li>
+        <li>Exact EV is unavailable — all outputs use estimated ranges.</li>
+        <li>ICM calculations require payout structure data not present in ClubGG hand histories.</li>
+        <li>Opponent hole cards are never known — call/fold edges marked SPECULATIVE.</li>
+      </ul>
+    </details>
+    ${_rvNavBtns(hasPrev, hasNext)}`;
+
+  _rvBindNavBtns(revealEl);
+}
+
+function _rvNavBtns(hasPrev, hasNext) {
+  return `<div class="rs-reveal-btns">
+    <button class="rs-dec-btn" id="rv-prev-hand-reveal" ${hasPrev ? '' : 'disabled'}>‹ Prev</button>
+    <button class="rs-dec-btn rs-dec-btn--call" id="rv-next-hand-reveal" ${hasNext ? '' : 'disabled'}>Next ›</button>
+  </div>`;
+}
+
+function _rvBindNavBtns(revealEl) {
+  revealEl.querySelector('#rv-prev-hand-reveal')?.addEventListener('click', () => {
+    if (!_rs) return;
+    const { rvHandIdx: i, rvFilteredHands: fh, rvPanel: p } = _rs;
+    if (i > 0) { _rsStop(); _trOpenHand(p, fh, i - 1); }
+  });
+  revealEl.querySelector('#rv-next-hand-reveal')?.addEventListener('click', () => {
+    if (!_rs) return;
+    const { rvHandIdx: i, rvFilteredHands: fh, rvPanel: p } = _rs;
+    if (i < fh.length - 1) { _rsStop(); _trOpenHand(p, fh, i + 1); }
+  });
+}
+
+// ── Full timeline (all streets) ────────────────────────────────────────────
+
+function rsBuildFullTimeline(hand) {
+  const sRank = { PREFLOP: 0, FLOP: 1, TURN: 2, RIVER: 3 };
+  const bb    = parseFloat(hand.stakes_bb) || 1;
+  const seq   = [];
+  for (const hp of hand.hand_players) {
+    for (const act of (hp.actions || [])) {
+      seq.push({
+        playerId:     hp.player_id,
+        pos:          hp.position || `S${hp.seat_number}`,
+        username:     hp.username || hp.position || `S${hp.seat_number}`,
+        street:       act.street,
+        action_type:  act.action_type,
+        action_order: act.action_order,
+        amount:       act.amount ? parseFloat(act.amount) / bb : 0,
+        is_all_in:    act.is_all_in || false,
+      });
+    }
+  }
+  seq.sort((a, b) => {
+    const d = (sRank[a.street] ?? 99) - (sRank[b.street] ?? 99);
+    return d !== 0 ? d : a.action_order - b.action_order;
+  });
+  return seq;
+}
+
+// ── API helper ─────────────────────────────────────────────────────────────
+
+async function _trFetch(path) {
+  const token = authGetToken();
+  const res = await fetch(`/api/v1${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
 }

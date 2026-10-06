@@ -1,3 +1,4 @@
+import dataclasses
 import uuid
 from datetime import UTC, datetime
 
@@ -6,15 +7,24 @@ from fastapi.responses import HTMLResponse
 
 from app.dependencies import DBSession
 from app.features.leak_examples import build_leak_examples
-from app.features.leaks import LeakDetector, analysis_note
+from app.features.leaks import analyze_leaks
 from app.features.player_stats import compute_player_stats
+from app.features.progress import compute_progress
+from app.features.results import compute_results
 from app.features.tournament_plan import build_tournament_plan
+from app.features.tournaments import compute_tournaments
 from app.schemas.common import PaginatedResponse
+from app.schemas.drills import DrillRecommendationOut, DrillSpotOut, VsRaiseDrillsOut
+from app.schemas.leak_report import LeakReportOut
 from app.schemas.leaks import LeakExampleOut, LeakOut, PlayerLeaksOut
 from app.schemas.player import ClubOut, PlayerDetailOut, PlayerOut, PlayerSampleOut
+from app.schemas.progress import PlayerProgressOut
+from app.schemas.results import PlayerResultsOut, PlayerTournamentsOut
 from app.schemas.stats import PlayerStatsOut
 from app.schemas.tournament_plan import StudyPriorityOut, TournamentPlanOut, TournamentPlanRequest
+from app.services.drill_service import vs_raise_drills
 from app.services.hand_service import hand_records_for_player
+from app.services.leak_report_service import build_leak_report
 from app.services.player_service import (
     get_club,
     get_player,
@@ -100,6 +110,79 @@ async def get_player_stats(
     return out.model_copy(update={"player_name": player.username})
 
 
+# ── Results endpoint ─────────────────────────────────────────────────────────
+
+
+@router.get("/{player_id}/results", response_model=PlayerResultsOut)
+async def get_player_results(
+    player_id: uuid.UUID,
+    db: DBSession,
+    limit: int = Query(10000, ge=1, le=10000, description="Max hands to load"),
+    from_date: datetime | None = Query(None, description="Filter hands from this UTC datetime"),
+    to_date: datetime | None = Query(None, description="Filter hands up to this UTC datetime"),
+) -> PlayerResultsOut:
+    """
+    Chip results (bb) by position and effective stack depth, with a running
+    total.  Each bb/100 carries a 95% margin; ``significant`` means the margin
+    excludes zero.  Chip results, not money: tournament ICM is not modelled.
+    """
+    player = await get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    records, _ = await hand_records_for_player(
+        db, player_id, limit=limit, from_date=from_date, to_date=to_date
+    )
+    # Records come newest-first; the running total needs chronological order.
+    results = compute_results(list(reversed(records)))
+    return PlayerResultsOut.model_validate({"player_id": player_id, **dataclasses.asdict(results)})
+
+
+@router.get("/{player_id}/tournaments", response_model=PlayerTournamentsOut)
+async def get_player_tournaments(
+    player_id: uuid.UUID,
+    db: DBSession,
+    limit: int = Query(10000, ge=1, le=10000, description="Max hands to load"),
+) -> PlayerTournamentsOut:
+    """
+    Per-tournament summaries (hands, levels, entries, busts, chip result) and
+    a breakdown by blind-level phase.  Bubble/ITM are not detectable from
+    hand histories (no players-remaining or payout data), so phases are
+    blind-level bands.
+    """
+    player = await get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    records, _ = await hand_records_for_player(db, player_id, limit=limit)
+    breakdown = compute_tournaments(player_id, list(reversed(records)))
+    return PlayerTournamentsOut.model_validate(
+        {"player_id": player_id, **dataclasses.asdict(breakdown)}
+    )
+
+
+@router.get("/{player_id}/progress", response_model=PlayerProgressOut)
+async def get_player_progress(
+    player_id: uuid.UUID,
+    db: DBSession,
+    limit: int = Query(10000, ge=1, le=10000, description="Max hands to load"),
+) -> PlayerProgressOut:
+    """
+    Key preflop frequencies per month with 95% intervals, and the latest month
+    compared with all earlier months.  "improved"/"worse" only when the change
+    is significant, judged by distance to an approximate normal range.
+    """
+    player = await get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    records, _ = await hand_records_for_player(db, player_id, limit=limit)
+    progress = compute_progress(player_id, records)
+    return PlayerProgressOut.model_validate(
+        {"player_id": player_id, **dataclasses.asdict(progress)}
+    )
+
+
 # ── Leaks endpoint ───────────────────────────────────────────────────────────
 
 
@@ -125,9 +208,8 @@ async def get_player_leaks(
     records, contexts = await hand_records_for_player(
         db, player_id, limit=limit, from_date=from_date, to_date=to_date
     )
-    stats = compute_player_stats(player_id=player_id, hands=records)
-    detector = LeakDetector()
-    leaks = detector.detect(stats)
+    analysis = analyze_leaks(player_id, records)
+    leaks = analysis.leaks
 
     leak_outs: list[LeakOut] = []
     for leak in leaks:
@@ -164,9 +246,68 @@ async def get_player_leaks(
 
     return PlayerLeaksOut(
         player_id=player_id,
-        hand_count=stats.hand_count,
+        hand_count=analysis.stats.hand_count,
         leaks=leak_outs,
-        analysis_note=analysis_note(stats.hand_count, len(leaks)),
+        analysis_note=analysis.note,
+    )
+
+
+@router.get("/{player_id}/leak-report", response_model=LeakReportOut)
+async def get_player_leak_report(
+    player_id: uuid.UUID,
+    db: DBSession,
+    limit: int = Query(500, ge=1, le=2000, description="Max hands to analyze"),
+    from_date: datetime | None = Query(None, description="Filter hands from this UTC datetime"),
+    to_date: datetime | None = Query(None, description="Filter hands up to this UTC datetime"),
+) -> LeakReportOut:
+    """
+    Hand-by-hand leak report: patterns in per-hand decision analysis
+    (push/fold, calling shoves, steals), complementing the stat-based /leaks.
+    """
+    player = await get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    report = await build_leak_report(
+        db, player_id, limit=limit, from_date=from_date, to_date=to_date
+    )
+    return LeakReportOut.model_validate(report, from_attributes=True)
+
+
+@router.get("/{player_id}/drills/vs-raise", response_model=VsRaiseDrillsOut)
+async def get_vs_raise_drills(
+    player_id: uuid.UUID,
+    db: DBSession,
+    limit: int = Query(12, ge=1, le=50, description="Max spots to return"),
+) -> VsRaiseDrillsOut:
+    """
+    Drill spots from the player's own hands: facing a single preflop raise
+    (not in the BB, 30bb+ effective).  Spots where the player's real action
+    was outside the recommended set come first.
+    """
+    player = await get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    drills = await vs_raise_drills(db, player_id, player.username, limit=limit)
+    return VsRaiseDrillsOut(
+        player_id=player_id,
+        total_spots=drills.total_spots,
+        mistakes=drills.mistakes,
+        mistakes_by_position=drills.mistakes_by_position,
+        spots=[
+            DrillSpotOut(
+                **dataclasses.asdict(d.spot),
+                was_mistake=d.was_mistake,
+                recommendation=DrillRecommendationOut(
+                    **{
+                        **dataclasses.asdict(d.recommendation),
+                        "acceptable": list(d.recommendation.acceptable),
+                    }
+                ),
+            )
+            for d in drills.spots
+        ],
     )
 
 
@@ -191,14 +332,12 @@ async def get_tournament_plan(
     records, _ = await hand_records_for_player(
         db, player_id, limit=body.limit, from_date=from_date, to_date=to_date
     )
-    stats = compute_player_stats(player_id=player_id, hands=records)
-    detector = LeakDetector()
-    leaks = detector.detect(stats)
+    analysis = analyze_leaks(player_id, records)
 
     plan = build_tournament_plan(
         player_id=player_id,
-        stats=stats,
-        leaks=leaks,
+        stats=analysis.stats,
+        leaks=analysis.leaks,
         tournament_format=body.tournament_format,
         stage=body.stage,
         stack_bb=body.stack_bb,
@@ -467,7 +606,7 @@ async def export_player_report(
 
     records, _ = await hand_records_for_player(db, player_id, limit=limit)
     stats = compute_player_stats(player_id=player_id, hands=records)
-    leaks = LeakDetector().detect(stats)
+    leaks = analyze_leaks(player_id, records).leaks
 
     html = _build_report_html(player_id, player.username, stats, leaks)
     filename = f"clubgg-report-{player.username}.html"

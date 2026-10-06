@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
@@ -12,12 +13,13 @@ from sqlalchemy.orm import selectinload
 from app.db.session import AsyncSessionFactory, get_db
 from app.dependencies import require_tester
 from app.features.leak_examples import build_leak_examples
-from app.features.leaks import LeakDetector, analysis_note
+from app.features.leaks import analyze_leaks
 from app.features.player_stats import compute_player_stats
 from app.ingestion.hand_parser import _HAND_BLOCK_RE, HandHistoryFileIngestor, HandHistoryParser
 from app.models.hand import Hand, HandPlayer
 from app.models.player import Club, Player
 from app.models.user import User
+from app.schemas.leak_report import LeakReportOut
 from app.schemas.leaks import LeakExampleOut, LeakOut, PlayerLeaksOut
 from app.schemas.me import (
     HandPlayerSummaryOut,
@@ -32,6 +34,7 @@ from app.schemas.me import (
 from app.schemas.stats import PlayerStatsOut
 from app.services.billing_service import require_feature
 from app.services.hand_service import hand_records_for_player
+from app.services.leak_report_service import build_leak_report
 from app.services.user_player_service import (
     get_linked_players,
     get_primary_player,
@@ -181,13 +184,14 @@ async def get_my_analysis(
     records, contexts = await hand_records_for_player(
         session, player.id, limit=limit, from_date=from_date, to_date=to_date
     )
+    # Stats shown are over all hands; leaks use the filtered leak sample.
     stats = compute_player_stats(player_id=player.id, hands=records)
-    detector = LeakDetector()
-    leaks = detector.detect(stats)
+    analysis = analyze_leaks(player.id, records)
+    leaks = analysis.leaks
     leak_outs = _build_leak_outs(leaks[:5], records, contexts)
 
     biggest = leaks[0].title if leaks else None
-    note = analysis_note(stats.hand_count, len(leaks))
+    note = analysis.note
 
     return MeAnalysisOut(
         player_id=player.id,
@@ -201,7 +205,7 @@ async def get_my_analysis(
         stats=PlayerStatsOut.model_validate(stats, from_attributes=True),
         leaks=PlayerLeaksOut(
             player_id=player.id,
-            hand_count=stats.hand_count,
+            hand_count=analysis.stats.hand_count,
             leaks=leak_outs,
             analysis_note=note,
         ),
@@ -238,17 +242,34 @@ async def get_my_leaks(
     records, contexts = await hand_records_for_player(
         session, player.id, limit=limit, from_date=from_date, to_date=to_date
     )
-    stats = compute_player_stats(player_id=player.id, hands=records)
-    detector = LeakDetector()
-    leaks = detector.detect(stats)
-    leak_outs = _build_leak_outs(leaks, records, contexts)
-    note = analysis_note(stats.hand_count, len(leaks))
+    analysis = analyze_leaks(player.id, records)
+    leak_outs = _build_leak_outs(analysis.leaks, records, contexts)
     return PlayerLeaksOut(
         player_id=player.id,
-        hand_count=stats.hand_count,
+        hand_count=analysis.stats.hand_count,
         leaks=leak_outs,
-        analysis_note=note,
+        analysis_note=analysis.note,
     )
+
+
+@router.get("/me/leak-report", response_model=LeakReportOut)
+async def get_my_leak_report(
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_tester),
+    _gate: None = Depends(_require_leak_tracker),
+    limit: int = Query(500, ge=1, le=2000),
+    from_date: datetime | None = Query(None),
+    to_date: datetime | None = Query(None),
+) -> LeakReportOut:
+    player = await _get_primary_or_404(session, current_user.id)
+    report = await build_leak_report(
+        session,
+        player.id,
+        limit=limit,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return LeakReportOut.model_validate(report, from_attributes=True)
 
 
 # ── Recent hands ──────────────────────────────────────────────────────────────
@@ -286,6 +307,9 @@ async def get_my_hands(
             )
             for hp in sorted(hand.hand_players, key=lambda hp: hp.seat_number or 0)
         ]
+        net_won_bb = None
+        if hero_hp and hero_hp.net_won is not None and hand.stakes_bb:
+            net_won_bb = str((hero_hp.net_won / hand.stakes_bb).quantize(Decimal("0.1")))
         hand_outs.append(
             MeHandOut(
                 hand_external_id=hand.external_id,
@@ -295,6 +319,7 @@ async def get_my_hands(
                     str(hero_hp.stack_bb) if hero_hp and hero_hp.stack_bb is not None else None
                 ),
                 net_won=(str(hero_hp.net_won) if hero_hp and hero_hp.net_won is not None else None),
+                net_won_bb=net_won_bb,
                 board_cards=hand.board_cards,
                 hand_started_at=hand.hand_started_at,
                 player_count=hand.player_count,

@@ -77,6 +77,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -238,6 +239,20 @@ class HandRecord:
     check_raised: bool = field(default=False)
     postflop_bets_raises: int = field(default=0)
     postflop_calls: int = field(default=0)
+
+    # ── Hand context ──────────────────────────────────────────────────────────
+    # True when the hand had antes (tournament levels). Selects leak baselines.
+    has_ante: bool = field(default=False)
+    # Net chips won in the hand / big blind.  None when the result is unknown.
+    net_bb: Decimal | None = field(default=None)
+    # Tournament context from the hand header (None = cash / unknown).
+    tournament_id: str | None = field(default=None)
+    tournament_name: str | None = field(default=None)
+    blind_level: int | None = field(default=None)
+    # Hero finished the hand with zero chips.
+    busted: bool = field(default=False)
+    # When the hand started (UTC).  None when unknown.
+    played_at: datetime | None = field(default=None)
 
 
 # ---------------------------------------------------------------------------

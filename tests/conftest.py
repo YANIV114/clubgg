@@ -59,6 +59,24 @@ def pytest_collection_modifyitems(
                 item.add_marker(skip_db)
 
 
+# ── Beta gate ─────────────────────────────────────────────────────────────────
+
+TEST_INVITE_CODE = "test-invite-code"
+
+
+@pytest.fixture
+def beta_gate(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Enable the beta gate with TEST_INVITE_CODE, as in production.
+
+    Users registered with this invite code get is_tester=True and can reach
+    routes protected by require_tester.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "BETA_INVITE_CODE", TEST_INVITE_CODE)
+    return TEST_INVITE_CODE
+
+
 # ── DB integration fixtures ───────────────────────────────────────────────────
 # Only instantiated when DATABASE_URL is set.
 

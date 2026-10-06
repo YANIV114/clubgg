@@ -66,12 +66,16 @@ _HEADER_RE = re.compile(
 _HEADER_GG_RE = re.compile(
     r"Poker Hand #(?P<hand_id>\S+):\s+(?P<game_desc>.+?)\s+No Limit"
     r"(?:"
-    r"\s+-\s+Level\d+\((?P<sb>[\d,]+)/(?P<bb>[\d,]+)(?:/[\d,]+)?\)"  # tournament: " - Level12(750/1,500)"
+    # tournament: " - Level12(750/1,500)"; GG network adds the ante: " - Level5(125/250(35))"
+    r"\s+-\s+Level(?P<level>\d+)\((?P<sb>[\d,]+)/(?P<bb>[\d,]+)(?:/[\d,]+|\([\d,]+\))?\)"
     r"|"
     r"\s+\(\$(?P<sb2>[\d,]+(?:\.\d+)?)/\$(?P<bb2>[\d,]+(?:\.\d+)?)\)"  # cash: " ($1/$2)"
     r")\s+-\s+"
     r"(?P<ts>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})"
 )
+# Tournament game description: "Tournament #3317780, 200K GTD ♠ FROZEN THRONE HR ♠ RE NLH"
+_TOURNAMENT_RE = re.compile(r"Tournament #(?P<tid>\d+),\s*(?P<name>.+)")
+_GAME_SUFFIX_RE = re.compile(r"\s+(?:NLH|PLO\d?|Hold'em|Short Deck)$", re.IGNORECASE)
 _CLUB_RE = re.compile(
     r"Club:\s+(?P<club_name>.+?)\s+\(ID:\s*(?P<club_id>\d+)\)"
     r"(?:\s+Agent:\s+(?P<agent_name>.+?)\s+\(ID:\s*(?P<agent_id>\d+)\))?"
@@ -87,10 +91,16 @@ _SEAT_RE = re.compile(
 # Handles both old format ($-prefixed, no commas) and GGPoker format (no $, comma thousands).
 # For raises: captures both X and Y from "raises X to Y" — Y (amount2) is the total.
 # For "is all-in" (standalone): raw_action == "is", mapped to ALL_IN.
+# Separators are [ \t], never \s: \s matches newlines, so "X: folds\n2d57...: folds"
+# would read "2" as fold's amount and swallow the next player's line.
 _ACTION_RE = re.compile(
-    r"^(?P<username>.+?):\s+"
+    r"^(?P<username>.+?):[ \t]+"
     r"(?P<action>folds|checks|calls|bets|raises|is all-in)"
-    r"(?:\s+\$?(?P<amount>[\d,]+(?:\.\d+)?)(?:\s+to\s+\$?(?P<amount2>[\d,]+(?:\.\d+)?))?)?(?P<allin> and is all-in)?",
+    r"(?:[ \t]+\$?(?P<amount>[\d,]+(?:\.\d+)?))?"
+    # "to Y" may follow the increment ("raises 450 to 570") or stand alone
+    # ("raises to 21 and is all-in").
+    r"(?:[ \t]+to[ \t]+\$?(?P<amount2>[\d,]+(?:\.\d+)?))?"
+    r"(?P<allin> and is all-in)?",
     re.MULTILINE,
 )
 
@@ -127,6 +137,11 @@ _MUCK_RE = re.compile(
 )
 
 _BOARD_RE = re.compile(r"Board \[(?P<cards>[^\]]+)\]")
+# "Uncalled bet (9,600) returned to 589f9da2" / "Uncalled bet ($4.00) returned to Alice"
+_UNCALLED_RE = re.compile(
+    r"^Uncalled bet \(\$?(?P<amount>[\d,]+(?:\.\d+)?)\) returned to (?P<username>.+?)\s*$",
+    re.MULTILINE,
+)
 _POT_RE = re.compile(
     r"Total pot \$?(?P<total>[\d,]+(?:\.\d+)?)(?:\s*\|\s*Rake \$?(?P<rake>[\d,]+(?:\.\d+)?))?"
 )
@@ -166,6 +181,9 @@ class _ParsedHand:
     stakes_sb: Decimal = Decimal("0")
     stakes_bb: Decimal = Decimal("0")
     stakes_ante: Decimal | None = None
+    tournament_external_id: str | None = None
+    tournament_name: str | None = None
+    blind_level_index: int | None = None
     table_name: str | None = None
     button_seat: int | None = None
     hand_started_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
@@ -180,6 +198,8 @@ class _ParsedHand:
     streets_dealt: set[str] = field(default_factory=set)
     # username → {did_show, hole_cards, hand_description}
     showdowns: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # username → uncalled bet returned to that player
+    returned: dict[str, Decimal] = field(default_factory=dict)
 
 
 # ── Parser ────────────────────────────────────────────────────────────────────
@@ -203,6 +223,7 @@ class HandHistoryParser:
         self._parse_summary(block, h)  # winners, pot, board
         self._enrich(h)  # saw_flop, did_show, hole_cards per player;
         # winning_hand_description on winners
+        self._compute_results(h)  # ending_stack per player, when the hand reconciles
 
         return {
             "external_id": h.hand_id,
@@ -212,6 +233,9 @@ class HandHistoryParser:
             "stakes_sb": str(h.stakes_sb),
             "stakes_bb": str(h.stakes_bb),
             "stakes_ante": str(h.stakes_ante) if h.stakes_ante else None,
+            "tournament_external_id": h.tournament_external_id,
+            "tournament_name": h.tournament_name,
+            "blind_level_index": h.blind_level_index,
             "table_name": h.table_name,
             "button_seat": h.button_seat,
             "hand_started_at": h.hand_started_at.isoformat(),
@@ -257,6 +281,12 @@ class HandHistoryParser:
                 tzinfo=UTC
             )
             desc = m.group("game_desc").lower()
+            if m.group("level"):
+                h.blind_level_index = int(m.group("level"))
+            tm = _TOURNAMENT_RE.match(m.group("game_desc"))
+            if tm:
+                h.tournament_external_id = tm.group("tid")
+                h.tournament_name = _GAME_SUFFIX_RE.sub("", tm.group("name")).strip() or None
             # No club line in GGPoker exports — use sentinel 0 (auto-created by upload endpoint)
             h.club_id = 0
             h.club_name = "ClubGG"
@@ -340,12 +370,20 @@ class HandHistoryParser:
                         "big blind": "POST_BB",
                         "ante": "POST_ANTE",
                     }
+                    amount = Decimal(m.group("amount").replace(",", ""))
+                    # GGPoker tournament headers omit the ante, so take it from
+                    # the posts. Use the largest post: a short stack may post
+                    # a partial ante.
+                    if blind_type == "ante" and (
+                        h.stakes_ante is None or amount > h.stakes_ante
+                    ):
+                        h.stakes_ante = amount
                     h.actions.append(
                         {
                             "player_username": m.group("username"),
                             "street": "PREFLOP",
                             "action_type": action_map[blind_type],
-                            "amount": str(Decimal(m.group("amount").replace(",", ""))),
+                            "amount": str(amount),
                             "is_all_in": False,
                             "action_order": action_order,
                         }
@@ -456,6 +494,11 @@ class HandHistoryParser:
         if board_m:
             h.board_cards = board_m.group("cards")
 
+        for m in _UNCALLED_RE.finditer(block):
+            username = m.group("username")
+            amount = Decimal(m.group("amount").replace(",", ""))
+            h.returned[username] = h.returned.get(username, Decimal("0")) + amount
+
         for m in _WINNER_RE.finditer(block):
             pot_desc = m.group("pot_desc").strip().lower()
             # Normalise: "pot"/"main pot" → "main", "side pot" → "side", "side pot-1" → "side-1"
@@ -506,6 +549,57 @@ class HandHistoryParser:
             sd = h.showdowns.get(w["player_username"])
             if sd and sd.get("hand_description"):
                 w["winning_hand_description"] = sd["hand_description"]
+
+    def _compute_results(self, h: _ParsedHand) -> None:
+        """
+        Set ``ending_stack`` per player = starting − chips put in + chips collected.
+
+        Chips put in: antes, plus each street's final commitment (blinds, calls
+        and bets add; "raises X to Y" sets the street total to Y), minus any
+        uncalled bet returned.  The hand must reconcile — chips in equal chips
+        collected plus rake — otherwise ending_stack stays None: a result is
+        never guessed.
+        """
+        put_in: dict[str, Decimal] = {p["player_username"]: Decimal("0") for p in h.players}
+        street_total: dict[tuple[str, str], Decimal] = {}
+
+        for a in h.actions:
+            t = a["action_type"]
+            if t in ("SHOW", "MUCK", "FOLD", "CHECK"):
+                continue
+            user = a["player_username"]
+            if user not in put_in or a["amount"] is None:
+                return  # unknown seat or an all-in with no amount: can't account
+            amount = Decimal(a["amount"])
+            if t == "POST_ANTE":
+                put_in[user] += amount
+                continue
+            key = (user, a["street"])
+            prev = street_total.get(key, Decimal("0"))
+            street_total[key] = amount if t == "RAISE" else prev + amount
+
+        for (user, _street), amount in street_total.items():
+            put_in[user] += amount
+        for user, amount in h.returned.items():
+            if user not in put_in:
+                return
+            put_in[user] -= amount
+
+        collected: dict[str, Decimal] = {}
+        for w in h.winners:
+            user = w["player_username"]
+            if user not in put_in:
+                return
+            collected[user] = collected.get(user, Decimal("0")) + Decimal(w["amount_won"])
+
+        if sum(put_in.values()) != sum(collected.values()) + h.total_rake:
+            logger.debug("Hand %s does not reconcile; results left unknown", h.hand_id)
+            return
+
+        for p in h.players:
+            user = p["player_username"]
+            start = Decimal(p["starting_stack"])
+            p["ending_stack"] = str(start - put_in[user] + collected.get(user, Decimal("0")))
 
 
 # ── File ingestor ─────────────────────────────────────────────────────────────

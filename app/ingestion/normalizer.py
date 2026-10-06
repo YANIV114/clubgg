@@ -198,6 +198,9 @@ def normalize_file_hand(raw: dict, club_id: str) -> IngestHandPayload:
         stakes_ante=_dec(raw["stakes_ante"]) if raw.get("stakes_ante") else None,
         table_name=raw.get("table_name"),
         button_seat=raw.get("button_seat"),
+        blind_level_index=raw.get("blind_level_index"),
+        tournament_external_id=raw.get("tournament_external_id"),
+        tournament_name=raw.get("tournament_name"),
         hand_started_at=_dt(raw["hand_started_at"]),  # type: ignore[arg-type]
         hand_ended_at=_dt(raw.get("hand_ended_at")),
         total_pot=_dec(raw["total_pot"]),

@@ -2,6 +2,7 @@
 Service layer for Hand ingestion and queries.
 """
 
+import dataclasses
 import uuid
 from datetime import datetime
 from typing import Any
@@ -48,6 +49,8 @@ async def upsert_hand(session: AsyncSession, payload: IngestHandPayload) -> None
         "button_seat": payload.button_seat,
         "blind_level_index": payload.blind_level_index,
         "players_remaining": payload.players_remaining,
+        "tournament_external_id": payload.tournament_external_id,
+        "tournament_name": payload.tournament_name,
     }
     hand_stmt = (
         insert(Hand)
@@ -379,6 +382,21 @@ async def hand_records_for_player(
             saw_flop=saw_flop,
             reached_showdown=reached_showdown,
             won_at_showdown=won_at_showdown,
+        )
+        net_bb = (
+            hero_hp.net_won / hand.stakes_bb
+            if hero_hp.net_won is not None and hand.stakes_bb
+            else None
+        )
+        record = dataclasses.replace(
+            record,
+            has_ante=bool(hand.stakes_ante),
+            net_bb=net_bb,
+            tournament_id=hand.tournament_external_id,
+            tournament_name=hand.tournament_name,
+            blind_level=hand.blind_level_index,
+            busted=hero_hp.ending_stack is not None and hero_hp.ending_stack == 0,
+            played_at=hand.hand_started_at,
         )
         records.append(record)
         contexts[hand.external_id] = HandContext(

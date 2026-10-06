@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.billing import SubscriptionPlan
 from app.services.billing_service import PLAN_DEFINITIONS
+from tests.conftest import TEST_INVITE_CODE
+
+pytestmark = pytest.mark.usefixtures("beta_gate")
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -18,7 +21,7 @@ from app.services.billing_service import PLAN_DEFINITIONS
 async def _register(client: AsyncClient, email: str) -> str:
     resp = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "testpass123"},
+        json={"email": email, "password": "testpass123", "invite_code": TEST_INVITE_CODE},
     )
     assert resp.status_code == 201
     return resp.json()["access_token"]

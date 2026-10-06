@@ -14,6 +14,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.course import Course, Lesson, Module
+from tests.conftest import TEST_INVITE_CODE
+
+pytestmark = pytest.mark.usefixtures("beta_gate")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,7 +60,7 @@ async def _register_and_token(client: AsyncClient, email: str) -> str:
     """Register a user and return the access token."""
     resp = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "testpass123"},
+        json={"email": email, "password": "testpass123", "invite_code": TEST_INVITE_CODE},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["access_token"]
